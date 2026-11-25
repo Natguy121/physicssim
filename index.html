@@ -286,16 +286,18 @@ const Audio = {
   },
   makeOsc(type, f, lp) { const c = this.ctx, o = c.createOscillator(), fl = c.createBiquadFilter(), g = c.createGain(); o.type = type; o.frequency.value = f; fl.type = 'lowpass'; fl.frequency.value = lp; g.gain.value = 0; o.connect(fl); fl.connect(g); g.connect(this.master); o.start(); return { o, fl, g }; },
   makeNoise(type, f) { const c = this.ctx, s = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain(); s.buffer = this.noiseBuf; s.loop = true; fl.type = type; fl.frequency.value = f; g.gain.value = 0; s.connect(fl); fl.connect(g); g.connect(this.master); s.start(); return { s, fl, g }; },
-  setLoop(name, gain, freq, q) { const l = this.loops[name]; if (!l) return; const t = this.ctx.currentTime; l.g.gain.setTargetAtTime(gain, t, 0.08); if (freq !== undefined) (l.o ? l.o.frequency : l.fl.frequency).setTargetAtTime(freq, t, 0.08); if (q !== undefined) l.fl.Q.value = q; },
+  setLoop(name, gain, freq, q) { const l = this.loops[name]; if (!l || !this.ctx) return; const t = this.ctx.currentTime; l.g.gain.setTargetAtTime(gain, t, 0.08); if (freq !== undefined) (l.o ? l.o.frequency : l.fl.frequency).setTargetAtTime(freq, t, 0.08); if (q !== undefined) l.fl.Q.value = q; },
   ok(key, minGap) { if (!this.ctx || !this.enabled || this.ctx.state !== 'running') return false; const now = this.ctx.currentTime; if (this.last[key] && now - this.last[key] < minGap) return false; this.last[key] = now; return true; },
   distGain(pos) { if (!pos || !App.camera) return 1; const d = App.camera.position.distanceTo(pos); return clamp(1 / (1 + d * 0.06), 0, 1); },
   burst(dur, type, freq, q, gain, pos, decay = dur) {
+    if (!this.ctx || !this.enabled) return;
     const c = this.ctx, s = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(), t = c.currentTime;
     s.buffer = this.noiseBuf; s.playbackRate.value = 0.7 + Math.random() * 0.6; f.type = type; f.frequency.value = freq; f.Q.value = q;
     const gg = gain * this.distGain(pos); g.gain.setValueAtTime(gg, t); g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
     s.connect(f); f.connect(g); g.connect(this.master); s.start(t, Math.random()); s.stop(t + dur + 0.05);
   },
   tone(type, f0, f1, dur, gain, pos) {
+    if (!this.ctx || !this.enabled) return;
     const c = this.ctx, o = c.createOscillator(), g = c.createGain(), t = c.currentTime; o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
     const gg = gain * this.distGain(pos); g.gain.setValueAtTime(gg, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(this.master); o.start(t); o.stop(t + dur + 0.02);
   },
@@ -397,9 +399,9 @@ const App = {
     this.scene.fog.color.copy(hor); if (Weather.type === 'storm' || Weather.type === 'rain') this.scene.fog.near = 20; else this.scene.fog.near = 60;
     this.scene.fog.far = Planets.active ? 5000 : this.perf.far * (1 - storm * 0.5);
     const fl = this.flash; this.flash = Math.max(0, this.flash - dt * 4);
-    this.sun.intensity = (Math.max(0, el) > 0 ? 2.6 * smooth(-0.05, 0.3, el) : 0) * (1 - storm * 0.7) + fl * 3;
-    this.sun.color.setHex(0xfff2dd).lerp(new THREE.Color(0xff9050), dusk);
-    this.hemi.intensity = 0.15 + 0.85 * day * (1 - storm * 0.4) + fl * 2; this.hemi.color.copy(hor).lerp(new THREE.Color(0xffffff), 0.4);
+    this.sun.intensity = (el > 0 ? 2.6 * smooth(-0.05, 0.3, el) : 0.45 * smooth(-0.02, -0.2, el)) * (1 - storm * 0.7) + fl * 3;
+    this.sun.color.setHex(0xfff2dd).lerp(new THREE.Color(0xff9050), dusk); if (el <= 0) this.sun.color.setHex(0x8fa8d8);
+    this.hemi.intensity = 0.45 + 0.6 * day * (1 - storm * 0.4) + fl * 2; this.hemi.color.copy(hor).lerp(new THREE.Color(0xffffff), 0.4);
     if (Planets.active) { this.sun.intensity = 3; this.hemi.intensity = 0.25; }
     // shadow camera follows the focus point
     const f = focus || this.camera.position;
@@ -570,6 +572,7 @@ const Terrain = {
     const L = this.LAKE, dl = Math.hypot(x - L.x, z - L.z);                                    // lake basin
     h = lerp(h, Math.min(h, -7 * (1 - (dl / L.r) ** 2) + 0.5), smooth(L.r + 25, L.r - 5, dl));
     if (dl < L.r) h = Math.min(h, -7 * (1 - (dl / L.r) ** 2) - 0.2);
+    else if (dl < L.r * 1.6) h = Math.max(h, lerp(L.level + 0.25, -50, smooth(L.r * 1.25, L.r * 1.6, dl)));
     const cliff = smooth(-148, -152, x); h = lerp(h, 26 + fbm(x * 0.05, z * 0.05, 3) * 3, cliff);  // sharp cliff to the west
     // Long hill for ramp tests: straight incline north of the build zone
     const hw = smooth(40, 25, Math.abs(x)), hz = clamp((-z - 90) / 150, 0, 1);
@@ -624,22 +627,23 @@ const Terrain = {
     this.mesh.receiveShadow = true; App.scene.add(this.mesh);
     // lake water + flood plane
     const wm = this.waterMat = new THREE.ShaderMaterial({
-      transparent: true, fog: true, uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { t: { value: 0 }, col: { value: new THREE.Color(0x2a6f97) }, deep: { value: new THREE.Color(0x0d3550) } }]),
+      transparent: true, fog: true, uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { t: { value: 0 }, col: { value: new THREE.Color(0x1f6a92) }, deep: { value: new THREE.Color(0x0a2f48) }, sky: { value: new THREE.Color(0x9cc8e8) } }]),
       vertexShader: `uniform float t; varying vec3 vW; varying float vH;
         #include <fog_pars_vertex>
         void main(){ vec3 p = position; float w = sin(p.x*0.35+t*1.3)*0.06 + sin(p.y*0.27+t*1.7)*0.05; p.z += w; vH = w; vec4 wp = modelMatrix*vec4(p,1.0); vW = wp.xyz; vec4 mvPosition = viewMatrix*wp; gl_Position = projectionMatrix*mvPosition;
         #include <fog_vertex>
         }`,
-      fragmentShader: `uniform vec3 col, deep; uniform float t; varying vec3 vW; varying float vH;
+      fragmentShader: `uniform vec3 col, deep, sky; uniform float t; varying vec3 vW; varying float vH;
         #include <fog_pars_fragment>
         void main(){ vec3 V = normalize(cameraPosition - vW); float fres = pow(1.0 - max(V.y,0.0), 3.0);
-          float sp = sin(vW.x*1.7+t*2.0)*sin(vW.z*1.3-t*1.6); vec3 c = mix(deep, col, 0.5+vH*4.0) + vec3(0.6,0.75,0.85)*fres*0.6 + smoothstep(0.85,1.0,sp)*0.12;
+          float rip = sin(vW.x*0.9+t*1.4+sin(vW.z*0.7)*1.5)*sin(vW.z*1.1-t*1.2+sin(vW.x*0.5)*1.3); vec3 c = mix(deep, col, 0.55+vH*3.0+rip*0.06) + sky*fres*0.45;
           gl_FragColor = vec4(c, 0.72 + fres*0.25);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
-          #include <fog_fragment> }`
+          #include <fog_fragment>
+        }`
     });
-    const L = this.LAKE; this.water = new THREE.Mesh(new THREE.PlaneGeometry(L.r * 2.6, L.r * 2.6, 40, 40), wm); this.water.rotation.x = -Math.PI / 2; this.water.position.set(L.x, L.level, L.z); App.scene.add(this.water);
+    const L = this.LAKE; this.water = new THREE.Mesh(new THREE.CircleGeometry(L.r * 1.06, 64, 0), wm); this.water.rotation.x = -Math.PI / 2; this.water.position.set(L.x, L.level, L.z); App.scene.add(this.water);
     this.flood = new THREE.Mesh(new THREE.PlaneGeometry(S, S, 60, 60), wm); this.flood.rotation.x = -Math.PI / 2; this.flood.visible = false; App.scene.add(this.flood);
     this.buildRoadsMarkings(); this.buildStuntPark(); this.buildRails(); this.buildVegetation();
   },
@@ -829,6 +833,9 @@ const World = {
     this.world.timestep = this.dt / this.substeps;
   },
   setGravity(y, x = 0, z = 0) { this.gravity.set(x, y, z); this.world.gravity = { x, y, z }; Entities.map.forEach(e => e.body?.wakeUp()); Bus.emit('gravity'); },
+  // Deferred actions (removals, detonations) run at the end of the current substep: deterministic, and never mid-step
+  deferred: [], defer(fn) { this.deferred.push(fn); },
+  flushDeferred() { while (this.deferred.length) { const q = this.deferred.splice(0); for (const f of q) f(); } },
   addPre(name, fn, order = 50) { this.pre.push({ name, fn, order }); this.pre.sort((a, b) => a.order - b.order); },
   addPost(name, fn, order = 50) { this.post.push({ name, fn, order }); this.post.sort((a, b) => a.order - b.order); },
   // Called once per rendered frame with the real elapsed time
@@ -853,7 +860,7 @@ const World = {
   },
   substep(dt) {
     const ents = Entities.awake;
-    this.sub = (this.sub || 0) + 1; for (const e of ents) { if (!e.body) continue; const v = e.body.linvel(); e.v0.set(v.x, v.y, v.z); e.ext.set(0, 0, 0); e.cf.set(0, 0, 0); e.cfMag = 0; e._sub = this.sub; }
+    this.sub = (this.sub || 0) + 1; for (const e of ents) { if (!e.body) continue; const v = e.body.linvel(); e.v0.set(v.x, v.y, v.z); e.ext.set(0, 0, 0); e.cfLast = e.cfMag; e.cf.set(0, 0, 0); e.cfMag = 0; e._sub = this.sub; }
     for (const p of this.pre) p.fn(dt);
     if (this.gyro) Gyro.pre(ents);
     this.world.step(this.eq);
@@ -868,6 +875,7 @@ const World = {
     if (this.gyro) Gyro.post();
     Entities.postStep(dt);
     for (const p of this.post) p.fn(dt);
+    this.flushDeferred();
   },
 };
 // Rapier does not model gyroscopic torque; conserve angular momentum across the rotation update instead
@@ -951,7 +959,8 @@ const Kinds = {
   compound: { // multiple sub-shapes: {parts:[{t,d,p,q,c}]}
     cols: p => p.parts.map(s => ({ d: s.t === 'box' ? R.ColliderDesc.cuboid(s.d[0] / 2, s.d[1] / 2, s.d[2] / 2) : s.t === 'sphere' ? R.ColliderDesc.ball(s.d[0]) : s.t === 'cyl' ? R.ColliderDesc.cylinder(s.d[1] / 2, s.d[0]) : s.t === 'cone' ? R.ColliderDesc.cone(s.d[1] / 2, s.d[0]) : R.ColliderDesc.capsule(s.d[1] / 2, s.d[0]), p: s.p, q: s.q, nocol: s.nocol })).filter(c => !c.nocol),
     geo: null, vol: p => p.parts.reduce((a, s) => a + (s.nocol ? 0 : s.t === 'box' ? s.d[0] * s.d[1] * s.d[2] : s.t === 'sphere' ? 4.19 * s.d[0] ** 3 : s.t === 'cone' ? 1.05 * s.d[0] ** 2 * s.d[1] : 3.14 * s.d[0] ** 2 * s.d[1]), 0),
-    half: p => { const b = new THREE.Box3(); p.parts.forEach(s => { const e = s.t === 'box' ? V3(s.d[0] / 2, s.d[1] / 2, s.d[2] / 2) : s.t === 'sphere' ? V3(s.d[0], s.d[0], s.d[0]) : V3(s.d[0], s.d[1] / 2 + (s.t === 'capsule' ? s.d[0] : 0), s.d[0]); const c = V3(...(s.p || [0, 0, 0])); const r = e.length(); b.expandByPoint(c.clone().addScalar(r)); b.expandByPoint(c.clone().addScalar(-r)); }); return b.getSize(V3()).multiplyScalar(0.5); },
+    box: p => { const b = new THREE.Box3(); p.parts.forEach(s => { if (s.nocol) return; const e = s.t === 'box' ? V3(s.d[0] / 2, s.d[1] / 2, s.d[2] / 2) : s.t === 'sphere' ? V3(s.d[0], s.d[0], s.d[0]) : V3(s.d[0], s.d[1] / 2 + (s.t === 'capsule' ? s.d[0] : 0), s.d[0]); if (s.q) { const q = new THREE.Quaternion(...s.q); const bb = new THREE.Box3(e.clone().negate(), e.clone()).applyMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(q)); e.copy(bb.max); } const c = V3(...(s.p || [0, 0, 0])); b.expandByPoint(c.clone().add(e)); b.expandByPoint(c.clone().sub(e)); }); return b; },
+    half: p => Kinds.compound.box(p).getSize(V3()).multiplyScalar(0.5), center: p => Kinds.compound.box(p).getCenter(V3()),
     mesh: (p, mat) => { const g = new THREE.Group(); p.parts.forEach(s => { const geo = s.t === 'box' ? new THREE.BoxGeometry(...s.d) : s.t === 'sphere' ? new THREE.SphereGeometry(s.d[0], 18, 12) : s.t === 'cyl' ? cyl(s.d[0], s.d[1], 18) : s.t === 'cone' ? new THREE.ConeGeometry(s.d[0], s.d[1], 18) : new THREE.CapsuleGeometry(s.d[0], s.d[1], 4, 12); const m = new THREE.Mesh(geo, s.c !== undefined ? Object.assign(mat.clone(), { _sub: true }) : mat); if (s.c !== undefined) m.material.color.setHex(s.c); if (s.p) m.position.set(...s.p); if (s.q) m.quaternion.set(...s.q); m.castShadow = m.receiveShadow = true; g.add(m); }); return g; },
   },
 };
@@ -978,9 +987,9 @@ const Entities = {
       frozen: !!d.frozen, kinematic: !!d.kinematic, group: d.group ?? null, hidden: !!d.hidden, temp: d.temp ?? (md.melts ? -5 : 20), hp: d.hp ?? 1, burning: !!d.burning, dmg: d.dmg ?? 0,
       p0: V3(), q0: new THREE.Quaternion(), p1: V3(), q1: new THREE.Quaternion(), v0: V3(), acc: V3(), ext: V3(), cf: V3(), cfMag: 0, joints: new Set(),
       massOverride: d.mass, densMul: d.densMul ?? 1, noFrac: !!d.noFrac, gravScale: d.gravScale ?? 1, ccd: !!d.ccd, respawn: d.respawn ? [...d.respawn] : null, extra: d.extra || {}, soft: d.soft ?? null,
-      linDamp: d.linDamp, angDamp: d.angDamp, cgroup: d.cgroup, created: World.time,
+      linDamp: d.linDamp, angDamp: d.angDamp, cgroup: d.cgroup, created: World.time, fricMul: d.fricMul ?? 1,
     };
-    e.vol = kind.vol(d.params); e.half = kind.half(d.params); e.radius = e.half.length();
+    e.vol = kind.vol(d.params); e.half = kind.half(d.params); e.radius = e.half.length(); e.cOff = kind.center ? kind.center(d.params) : V3();
     this.buildBody(e, d);
     this.buildMesh(e);
     this.map.set(id, e); this.all.push(e);
@@ -993,17 +1002,18 @@ const Entities = {
     const W = World.world, P = d.pos || [0, 0, 0], Q = d.rot || [0, 0, 0, 1];
     const bd = e.frozen ? R.RigidBodyDesc.fixed() : e.kinematic ? R.RigidBodyDesc.kinematicPositionBased() : R.RigidBodyDesc.dynamic();
     bd.setTranslation(...P).setRotation({ x: Q[0], y: Q[1], z: Q[2], w: Q[3] }).setLinearDamping(e.linDamp ?? World.linDamp).setAngularDamping(e.angDamp ?? World.angDamp).setCanSleep(World.sleeping).setGravityScale(e.gravScale);
-    if (e.ccd) bd.setCcdEnabled(true);
+    if (e.ccd) bd.setCcdEnabled(true).setSoftCcdPrediction(0.5);
     if (d.vel) bd.setLinvel(...d.vel); if (d.angvel) bd.setAngvel({ x: d.angvel[0], y: d.angvel[1], z: d.angvel[2] });
     e.body = W.createRigidBody(bd); e.dyn = !e.frozen && !e.kinematic; e.cols = [];
     const md = e.matDef, dens = e.massOverride ? e.massOverride / e.vol : md.density * e.densMul;
     for (const c of Kinds[e.kind].cols(e.params)) {
       const cd = c.d; if (c.p) cd.setTranslation(...c.p); if (c.q) cd.setRotation({ x: c.q[0], y: c.q[1], z: c.q[2], w: c.q[3] });
-      cd.setDensity(dens).setFriction(md.friction * World.frictionMul).setRestitution(clamp(md.rest * World.restMul, 0, 1.2)).setFrictionCombineRule(R.CoefficientCombineRule.Average)
+      cd.setDensity(dens).setFriction(md.friction * World.frictionMul * e.fricMul).setRestitution(clamp(md.rest * World.restMul, 0, 1.2)).setFrictionCombineRule(R.CoefficientCombineRule.Average)
         .setActiveEvents(R.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(0);
       const grp = e.cgroup ?? Kinds[e.kind].group; if (grp !== undefined) cd.setCollisionGroups(grp);
       const col = W.createCollider(cd, e.body); e.cols.push(col); this.byCol.set(col.handle, e);
     }
+    if (e.massOverride && e.dyn) { const m = e.body.mass(); if (m > 0 && Math.abs(m - e.massOverride) > e.massOverride * 0.005) { const k = e.massOverride / m; for (const c of e.cols) c.setDensity(dens * k); } } // exact mass for any shape
     e.mass = e.dyn ? e.body.mass() : (e.massOverride || dens * e.vol); e.fricState = 'k'; this.updateEvents(e);
   },
   // Contact-force events: exact (threshold 0) for jointed/breakable/sensor parts, otherwise only strong contacts (impacts)
@@ -1036,7 +1046,7 @@ const Entities = {
     const d = { id: e.id, kind: e.kind, params: e.params, mat: e.mat, color: e.color, part: e.part, pos: [t.x, t.y, t.z].map(x => +x.toFixed(5)), rot: [q.x, q.y, q.z, q.w].map(x => +x.toFixed(6)) };
     if (Math.hypot(v.x, v.y, v.z) > 1e-3) d.vel = [v.x, v.y, v.z].map(x => +x.toFixed(4)); if (Math.hypot(w.x, w.y, w.z) > 1e-3) d.angvel = [w.x, w.y, w.z].map(x => +x.toFixed(4));
     for (const k of ['label', 'frozen', 'kinematic', 'group', 'hidden', 'noFrac', 'ccd', 'soft', 'respawn', 'cgroup']) if (e[k]) d[k] = e[k];
-    if (e.massOverride) d.mass = e.massOverride; if (e.densMul !== 1) d.densMul = e.densMul; if (e.gravScale !== 1) d.gravScale = e.gravScale;
+    if (e.massOverride) d.mass = e.massOverride; if (e.densMul !== 1) d.densMul = e.densMul; if (e.fricMul !== 1) d.fricMul = e.fricMul; if (e.gravScale !== 1) d.gravScale = e.gravScale;
     if (e.linDamp !== undefined) d.linDamp = e.linDamp; if (e.angDamp !== undefined) d.angDamp = e.angDamp;
     if (Object.keys(e.beh).length) { d.beh = {}; for (const k in e.beh) { const b = { ...e.beh[k] }; for (const kk in b) if (kk.startsWith('_')) delete b[kk]; d.beh[k] = b; } }
     if (Object.keys(e.extra).length) d.extra = e.extra;
@@ -1049,12 +1059,12 @@ const Entities = {
   },
   setMaterial(e, mat) {
     const md = MATS[mat]; e.mat = mat; e.matDef = md; const dens = e.massOverride ? e.massOverride / e.vol : md.density * e.densMul;
-    for (const c of e.cols) { c.setDensity(dens); c.setFriction(md.friction * World.frictionMul); c.setRestitution(md.rest * World.restMul); }
+    for (const c of e.cols) { c.setDensity(dens); c.setFriction(md.friction * World.frictionMul * e.fricMul); c.setRestitution(md.rest * World.restMul); }
     e.mass = e.dyn ? e.body.mass() : dens * e.vol; const old = e.mat3; e.mat3 = this.makeMaterial(mat, e.color); e.mesh.traverse(o => { if (o.material === old) o.material = e.mat3; }); old.dispose();
     e.body.wakeUp();
   },
   setColor(e, c) { e.color = c; e.mat3.color.setHex(c); },
-  setMass(e, m) { e.massOverride = m; const dens = m / e.vol; for (const c of e.cols) c.setDensity(dens); e.mass = e.dyn ? e.body.mass() : m; e.body.wakeUp(); },
+  setMass(e, m) { const cur = e.dyn ? e.body.mass() : e.mass; const k = cur > 0 ? m / cur : 1; for (const c of e.cols) c.setDensity(c.density() * k); e.massOverride = m; e.mass = e.dyn ? e.body.mass() : m; e.body.wakeUp(); },
   // Rebuild entity with changed params (scale, size). Joints are re-created from their saved form.
   rebuild(e, changes) {
     const d = { ...this.serialize(e), ...changes }; const js = [...e.joints].map(j => Joints.serialize(j));
@@ -1084,12 +1094,13 @@ const Entities = {
         // static vs kinetic friction
         const sp = Math.abs(v.x) + Math.abs(v.y) + Math.abs(v.z);
         const st = sp < 0.06 ? 's' : 'k';
-        if (st !== e.fricState) { e.fricState = st; const f = (st === 's' ? e.matDef.staticF : e.matDef.friction) * World.frictionMul; for (const c of e.cols) c.setFriction(f); }
+        if (st !== e.fricState) { e.fricState = st; const f = (st === 's' ? e.matDef.staticF : e.matDef.friction) * World.frictionMul * e.fricMul; for (const c of e.cols) c.setFriction(f); }
         // rolling resistance for round shapes in contact
         if (Kinds[e.kind].round && e.cfMag > 0) {
           const w = b.angvel(), wl = Math.hypot(w.x, w.y, w.z);
           if (wl > 0.02) { const crr = e.mat === 'rubber' ? 0.012 : e.mat === 'metal' ? 0.002 : 0.006; const r = Math.max(e.half.y, 0.05); const imp = Math.min(crr * e.mass * 9.81 * r * dt, wl * 0.2 * e.mass * r * r); b.applyTorqueImpulse({ x: -w.x / wl * imp, y: -w.y / wl * imp, z: -w.z / wl * imp }, false); }
         }
+        if (!Planets.active && Math.abs(t.x) < 249 && Math.abs(t.z) < 249) { const gy = Terrain.groundY(t.x, t.z); if (t.y < gy - Math.max(1, e.radius * 1.5) && !Arena.inside(e.p1)) { b.setTranslation({ x: t.x, y: gy + e.radius, z: t.z }, true); b.setLinvel({ x: v.x, y: Math.abs(v.y) * 0.2, z: v.z }, true); e.p1.y = gy + e.radius; } } // anti-tunnelling
         if (t.y < -90 || Math.abs(t.x) > (Planets.active ? 6000 : 300) || Math.abs(t.z) > (Planets.active ? 6000 : 300) || (Planets.active && Math.abs(t.y - Planets.Y) > 6000)) this.outOfWorld(e);
         aw[n++] = e;
       }
@@ -1101,7 +1112,7 @@ const Entities = {
     if (F > 400) Audio.impact(F, e.mat, p);
     if (F > 6000 * Math.max(1, e.mass / 30) && (e.mat === 'concrete' || e.mat === 'stone' || e.mat === 'brick')) FX.dust(p, 4, 0x999080, 0.4);
     if (F > 3000 && e.matDef.snd === 'metal' && Math.random() < 0.3) FX.sparks(p, 6, 0.6);
-    if (e.extra.rag && ['torso', 'head', 'pelvis'].includes(e.extra.rag) && World.time - e.created > 1) BEH.dummy.hurt(e, F / e.mass / 9.81);
+    if (e.extra.rag && ['torso', 'head', 'pelvis'].includes(e.extra.rag) && World.time - e.created > 1 && this.map.get(e.touch)?.group !== e.group) BEH.dummy.hurt(e, F / e.mass / 9.81);
     if (e.beh.tnt && e.beh.tnt.impact && F / e.mass > e.beh.tnt.impact) BEH.tnt.detonate(e);
     if (e.beh.balloon && F > 60 * e.mass + 30) BEH.balloon.pop(e);
     Bus.emit('impact', e, F);
@@ -1111,7 +1122,7 @@ const Entities = {
   checkFracture(e, dv) { if (dv > this.fractureThreshold(e) && e.vol > 0.0008) Fracture.queue(e, dv * e.mass / World.dt); },
   outOfWorld(e) {
     if (e.respawn) { e.body.setTranslation({ x: e.respawn[0], y: e.respawn[1], z: e.respawn[2] }, true); e.body.setLinvel({ x: 0, y: 0, z: 0 }, true); e.body.setAngvel({ x: 0, y: 0, z: 0 }, true); toast('↩ Respawned ' + (PARTS[e.part]?.name || e.part)); return; }
-    queueMicrotask(() => this.remove(e));
+    World.defer(() => this.remove(e));
   },
   // Render interpolation between the previous and current fixed-step states
   syncMesh(e, alpha) {
@@ -1177,6 +1188,7 @@ const Joints = {
     if (o.length !== undefined) j.length = o.length; else j.length = pa.distanceTo(pb) * (j.params.slack ?? 1);
     j.breakF = o.breakF ?? def.F; j.breakT = o.breakT ?? def.T;
     this.buildRaw(j);
+    if (!['rope', 'spring'].includes(def.kind)) j.raws.forEach(r => r.setContactsEnabled(false)); // jointed parts never collide with each other
     this.list.push(j); a.joints.add(j); if (b) b.joints.add(j);
     const ratio = b && b.dyn && a.dyn ? Math.max(a.mass, b.mass) / Math.max(1e-3, Math.min(a.mass, b.mass)) : 1, extra = ratio > 10 ? 8 : 4;
     for (const e of [a, b]) if (e && e.dyn) { e.body.setAdditionalSolverIterations(Math.max(extra, e.body.additionalSolverIterations?.() || 0)); Entities.updateEvents(e); }
@@ -1218,7 +1230,7 @@ const Joints = {
         if (j.b) { const f2 = j.b.q1.clone().invert().multiply(j.a.q1); j.raws.push(W.createImpulseJoint(R.JointData.fixed({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0, w: 1 }, rv(Entities.localPoint(j.b, pa)), rq(f2)), ad, B, true)); }
       }
       j.adapter = ad;
-      const jd = R.JointData.prismatic(rv(la), { x: 0, y: 0, z: 0 }, rv(V3(...j.axA))); jd.limitsEnabled = true; jd.limits = [j.params.lo ?? -1, j.params.hi ?? 1];
+      const jd = R.JointData.prismatic(rv(la), { x: 0, y: 0, z: 0 }, rv(V3(...j.axA))); jd.limitsEnabled = true; jd.limits = [-(j.params.hi ?? 1), -(j.params.lo ?? -1)]; // Rapier measures B−A; our s = A−B
       const raw = W.createImpulseJoint(jd, A, ad, true); raw.setContactsEnabled(false); j.raws.push(raw);
     } else if (k === 'spring') {
       j.raws.push(W.createImpulseJoint(R.JointData.spring(j.length, j.params.stiffness, j.params.damping, rv(la), rv(lb)), A, B, true));
@@ -1256,7 +1268,7 @@ const Joints = {
   // Sticky material: glue bodies on contact
   autoGlue(a, b, c1, c2) {
     const key = Math.min(a.id, b.id) + ':' + Math.max(a.id, b.id); if (this.glued.has(key) || World.noBreak === 'nostick') return; this.glued.add(key);
-    queueMicrotask(() => {
+    World.defer(() => {
       if (a.removed || b.removed) return; let p = null;
       World.world.contactPair(World.world.getCollider(c1), World.world.getCollider(c2), (m) => { if (m.numSolverContacts() > 0) { const q = m.solverContactPoint(0); p = V3(q.x, q.y, q.z); } });
       if (!p) p = a.p1.clone().lerp(b.p1, 0.5);
@@ -1273,7 +1285,7 @@ const Joints = {
     const a = Math.atan2(ax.dot(_v1.crossVectors(ra, rb)), ra.dot(rb));
     if (j.prevAng === null) { j.prevAng = a; j.angle = a; } let d = a - j.prevAng; if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; j.angle += d; j.prevAng = a; return j.angle;
   },
-  sliderPos(j) { const ax = this.axisWorld(j, _v4); return _v5.copy(this.anchorB(j, _v6)).sub(this.anchorA(j, _v1)).dot(ax); },
+  sliderPos(j) { const ax = this.axisWorld(j, _v4); return _v5.copy(this.anchorA(j, _v6)).sub(this.anchorB(j, _v1)).dot(ax); },
   // ---- Stress estimation & breaking (post-step) -----------------------------------------
   // Rapier doesn't expose joint impulses, so we estimate each joint's load from a free-body balance:
   // F_constraint(body) = m*(a - g) - F_contacts - F_applied, shared among the body's joints.
@@ -1307,20 +1319,39 @@ const Joints = {
 // ---- Motors & joint controllers (custom impulses; torque-limited) -----------------------
 const Motors = {
   invI(e, n) { if (!e || !e.dyn) return 0; const S = sdpToMat(e.body.effectiveWorldInvInertiaSqrt().elements, e._S2 || (e._S2 = new Array(9))); const t = mat3Vec(S, n, _v3); return t.lengthSq(); },
+  // Inverse inertia about n of a body plus whatever is attached to it and must turn with it (one level deep).
+  // A light rotor/knuckle carrying a heavy wheel therefore gets realistic motor impulses.
+  // Co-rotating, co-located members: the body plus bodies attached near its axis that must turn with it
+  // (a hinge spinning about the same axis is free, so it is excluded). Returns [{e, I}].
+  assembly(e, skip, n) {
+    if (!e || !e.dyn) return []; const out = [{ e, I: 1 / Math.max(1e-9, this.invI(e, n)) }]; let mass = e.mass;
+    for (const k of e.joints) {
+      if (k === skip || k.def.kind === 'rope' || k.def.kind === 'bungee' || k.def.kind === 'spring' || k.def.kind === 'ball') continue; const o = k.a === e ? k.b : k.a;
+      if (k.def.kind === 'hinge' && Math.abs(Joints.axisWorld(k, _v6).dot(n)) > 0.9) continue;          // free to spin about n: not part of the assembly
+      if (!o || !o.dyn) { out.length = 0; out.rigid = null; return out; }                             // locked to the world
+      if (_v5.copy(o.p1).sub(e.p1).cross(n).length() > 0.3) { if (o.mass > 3 * mass) { out.length = 0; out.rigid = o; return out; } continue; } // held by a heavy body elsewhere
+      out.push({ e: o, I: 1 / Math.max(1e-9, this.invI(o, n)) }); mass += o.mass;
+    }
+    return out;
+  },
+  asmInvI(list) { let I = 0; for (const m of list) I += m.I; return I > 0 ? 1 / I : 0; },
+  asmApply(list, n, P) { if (list.rigid) { list.rigid.body.applyTorqueImpulse({ x: n.x * P, y: n.y * P, z: n.z * P }, true); return; } let I = 0; for (const m of list) I += m.I; for (const m of list) { const p = P * m.I / I; m.e.body.applyTorqueImpulse({ x: n.x * p, y: n.y * p, z: n.z * p }, true); } },
   relAngVel(j, n) { const wa = j.a.body.angvel(); let r = -(wa.x * n.x + wa.y * n.y + wa.z * n.z); if (j.b && j.b.dyn) { const wb = j.b.body.angvel(); r += wb.x * n.x + wb.y * n.y + wb.z * n.z; } return r; },
-  applyAngImpulse(j, n, P) { if (j.a.dyn) j.a.body.applyTorqueImpulse({ x: -n.x * P, y: -n.y * P, z: -n.z * P }, true); if (j.b && j.b.dyn) j.b.body.applyTorqueImpulse({ x: n.x * P, y: n.y * P, z: n.z * P }, true); },
+  applyAngImpulse(j, n, P) { if (j._asmA) { if (j._asmA.length || j._asmA.rigid) this.asmApply(j._asmA, n, -P); if (j._asmB.length || j._asmB.rigid) this.asmApply(j._asmB, n, P); return; } if (j.a.dyn) j.a.body.applyTorqueImpulse({ x: -n.x * P, y: -n.y * P, z: -n.z * P }, true); if (j.b && j.b.dyn) j.b.body.applyTorqueImpulse({ x: n.x * P, y: n.y * P, z: n.z * P }, true); },
   pointVel(e, p, out) { if (!e || !e.dyn) return out.set(0, 0, 0); const v = e.body.linvel(), w = e.body.angvel(), c = e.body.worldCom(); const rx = p.x - c.x, ry = p.y - c.y, rz = p.z - c.z; return out.set(v.x + w.y * rz - w.z * ry, v.y + w.z * rx - w.x * rz, v.z + w.x * ry - w.y * rx); },
   keyVal(code) { return code ? (Input.keys.has(code) ? 1 : 0) : 0; },
-  pre(dt) {
+  // Called several times per substep, interleaved with gear couplings, so a motor "feels" the load it drives.
+  pre(dt, it = 0) {
     for (const j of Joints.list) {
       const k = j.def.kind, P = j.params;
-      if (k === 'hinge') this.hinge(j, P, dt); else if (k === 'slider') this.slider(j, P, dt); else if (k === 'bungee') this.bungee(j, P, dt);
+      if (k === 'hinge') this.hinge(j, P, dt, it); else if (k === 'slider') this.slider(j, P, dt, it); else if (k === 'bungee' && it === 0) this.bungee(j, P, dt);
     }
   },
-  hinge(j, P, dt) {
-    const mode = P.mode; const n = Joints.axisWorld(j, V3());
-    const K = this.invI(j.a, n) + this.invI(j.b, n); if (K <= 0) return;
+  hinge(j, P, dt, it) {
+    const mode = P.mode; const n = Joints.axisWorld(j, j._n || (j._n = V3()));
+    if (it === 0 || j._K === undefined) { j._asmA = this.assembly(j.a, j, n); j._asmB = this.assembly(j.b, j, n); j._K = this.asmInvI(j._asmA) + this.asmInvI(j._asmB); } const K = j._K; if (K <= 0) return;
     const wrel = this.relAngVel(j, n);
+    if (it > 0) { if (j._tgt === null || j._tgt === undefined) return; const prev = j._acc; j._acc = clamp(j._acc + (j._tgt - wrel) / K, -j._max, j._max); this.applyAngImpulse(j, n, j._acc - prev); if (it === Motors.iters - 1) this.report(j, wrel, dt); return; }
     let maxImp = 0, target = null, theta = null;
     const gp = Input.gamepadAxes;
     if (mode === 'motor') {
@@ -1343,11 +1374,10 @@ const Motors = {
       // passive hinge: optional limits and friction
       if (P.friction > 0) { target = 0; maxImp = P.friction * dt; }
     }
-    if (target !== null) {
-      let imp = (target - wrel) / K; imp = clamp(imp, -maxImp, maxImp); this.applyAngImpulse(j, n, imp);
-      const tq = imp / dt; j.mot.torque = lerp(j.mot.torque, tq, 0.2); j.mot.rpm = lerp(j.mot.rpm, wrel * 30 / Math.PI, 0.2); j.mot.power = Math.abs(j.mot.torque * wrel);
-      j.mot.stall = maxImp > 0 && Math.abs(imp) >= maxImp * 0.98 && Math.abs(wrel) < Math.abs(target) * 0.15 && Math.abs(target) > 0.05;
-    } else { j.mot.torque *= 0.8; j.mot.rpm = lerp(j.mot.rpm, wrel * 30 / Math.PI, 0.2); j.mot.power = 0; j.mot.stall = false; }
+    const warm = target !== null && j._tgt !== null && j._tgt !== undefined && Math.abs(target - j._tgt) < 0.5 ? clamp((j._accPrev || 0) * 0.98, -maxImp, maxImp) : 0;
+    j._tgt = target; j._max = maxImp; j._acc = 0;
+    if (target !== null) { if (warm) { this.applyAngImpulse(j, n, warm); } const w2 = warm ? this.relAngVel(j, n) : wrel; j._acc = clamp(warm + (target - w2) / K, -maxImp, maxImp); this.applyAngImpulse(j, n, j._acc - warm); }
+    else { j.mot.torque *= 0.8; j.mot.rpm = lerp(j.mot.rpm, wrel * 30 / Math.PI, 0.2); j.mot.power = 0; j.mot.stall = false; }
     // limits
     if (P.limit) {
       if (theta === null) theta = Joints.hingeAngle(j);
@@ -1356,23 +1386,28 @@ const Motors = {
       if (theta > hi && w2 > (hi - theta) * 10) { const imp = ((hi - theta) * 10 - w2) / K; this.applyAngImpulse(j, n, Math.min(0, imp)); }
     }
   },
-  slider(j, P, dt) {
-    if (!P.mode) return; const n = Joints.axisWorld(j, V3()); const pa = Joints.anchorA(j, V3()), pb = Joints.anchorB(j, V3());
-    const s = pb.clone().sub(pa).dot(n);
+  iters: 6,
+  report(j, wrel, dt) { j._accPrev = j._acc; const tq = j._acc / dt; j.mot.torque = lerp(j.mot.torque, tq, 0.2); j.mot.rpm = lerp(j.mot.rpm, wrel * 30 / Math.PI, 0.2); j.mot.power = Math.abs(j.mot.torque * wrel); j.mot.stall = j._max > 0 && Math.abs(j._acc) >= j._max * 0.98 && Math.abs(wrel) < Math.abs(j._tgt) * 0.15 && Math.abs(j._tgt) > 0.05; },
+  slider(j, P, dt, it) {
+    if (!P.mode || (it > 0 && P.mode !== 'piston')) return; const n = Joints.axisWorld(j, V3()); const pa = Joints.anchorA(j, V3()), pb = Joints.anchorB(j, V3());
+    const s = pa.clone().sub(pb).dot(n);
     const B = j.adapter && !j.adapter.isFixed() ? null : j.b; // B side velocity: use B entity
-    const vr = this.pointVel(j.b, pb, _v1).sub(this.pointVel(j.a, pa, _v2)).dot(n);
+    const vr = this.pointVel(j.a, pa, _v1).sub(this.pointVel(j.b, pb, _v2)).dot(n);
     const K = (j.a.dyn ? 1 / j.a.mass : 0) + (j.b && j.b.dyn ? 1 / j.b.mass : 0); if (K <= 0) return;
     let imp = 0, maxImp = 0;
     if (P.mode === 'piston') {
       let cmd = this.keyVal(P.keyF) - this.keyVal(P.keyB); if (j.signal) cmd = j.signal > 0.5 ? 1 : -1; if (P.always) cmd = 1;
       if (cmd) P.target = cmd > 0 ? P.hi : P.lo;
       const force = P.pneumatic ? (j.pressure ?? 0) * P.area * 1e5 : P.force;
-      const vt = clamp((P.target - s) * 6, -P.speed, P.speed); imp = (vt - vr) / K; maxImp = force * dt; imp = clamp(imp, -maxImp, maxImp);
+      if (it > 0) return; const vt = clamp((P.target - s) * 6, -P.speed, P.speed), ev = vt - vr; const m = 1 / K; j._I = clamp((j._I || 0) + ev * force * dt * 3 + ev * dt * m * 60, -force, force); const F = clamp(ev * m / dt * 0.3 + j._I, -force, force); imp = F * dt; maxImp = force * dt; j._acc = imp;
       j.mot.torque = lerp(j.mot.torque, imp / dt, 0.2); j.mot.rpm = vr; j.mot.power = Math.abs(imp / dt * vr); j.mot.stall = Math.abs(imp) >= maxImp * 0.98 && Math.abs(vr) < 0.02 && Math.abs(P.target - s) > 0.02; j.mot.pos = s;
     } else if (P.mode === 'spring') {
-      const f = -P.stiffness * s - P.damping * vr; imp = f * dt; j.mot.torque = f; j.mot.pos = s;
+      let f = -P.stiffness * s - P.damping * vr; if (P.fric) f += -clamp(vr / K / dt, -P.fric, P.fric); imp = f * dt; j.mot.torque = f; j.mot.pos = s;
     }
-    if (imp) { if (j.b && j.b.dyn) j.b.body.applyImpulseAtPoint({ x: n.x * imp, y: n.y * imp, z: n.z * imp }, pb, true); if (j.a.dyn) j.a.body.applyImpulseAtPoint({ x: -n.x * imp, y: -n.y * imp, z: -n.z * imp }, pa, true); }
+    if (imp) this.pushSlider(j, n, pa, pb, imp);
+  },
+  pushSlider(j, n, pa, pb, imp) {
+    { if (j.a.dyn) j.a.body.applyImpulseAtPoint({ x: n.x * imp, y: n.y * imp, z: n.z * imp }, pa, true); if (j.b && j.b.dyn) j.b.body.applyImpulseAtPoint({ x: -n.x * imp, y: -n.y * imp, z: -n.z * imp }, pb, true); }
   },
   bungee(j, P, dt) { // elastic rope: pulls only when stretched beyond rest length
     const pa = Joints.anchorA(j, V3()), pb = Joints.anchorB(j, V3()); const d = pa.distanceTo(pb); const ext = d - j.length;
@@ -1445,15 +1480,18 @@ const Ropes = {
       // effective mass: a body that appears at several nodes (pulley block) contributes |sum of its node Jacobians|^2 / m
       const perBody = new Map(); for (let i = 0; i < n; i++) { const e = r.nodes[i].e; if (e && e.dyn) (perBody.get(e) || perBody.set(e, V3()).get(e)).add(J[i]); }
       let K = wK; perBody.forEach((j, e) => K += j.lengthSq() / e.mass); if (K <= 0) continue;
+      // gravity prediction only for bodies that are not pinned to something static (a drum on its axle doesn't fall)
+      const pinned = r.nodes.map(nd => !!nd.e && [...nd.e.joints].some(k => ['hinge', 'fixed', 'ball'].includes(k.def.kind) && (!(k.a === nd.e ? k.b : k.a) || !(k.a === nd.e ? k.b : k.a).dyn)));
       let acc = 0; const tgt = C < 0 ? -C / dt : -0.3 * C / dt;
-      for (let it = 0; it < 4; it++) {
+      for (let it = 0; it < 5; it++) {
+        if (it === 0 && r.lam < 0 && C > -0.005) { acc = r.lam * 0.98; for (let i = 0; i < n; i++) { const e = r.nodes[i].e; if (!e || !e.dyn) continue; const I = { x: J[i].x * acc, y: J[i].y * acc, z: J[i].z * acc }; if (pinned[i]) e.body.applyImpulse(I, true); else e.body.applyImpulseAtPoint(I, pts[i], true); e.ext.addScaledVector(J[i], acc); } if (wj) Motors.applyAngImpulse(wj, wn, acc * r.winch.r * (r.winch.dir || 1)); } // warm start
         let cd = 0;
-        for (let i = 0; i < n; i++) { const e = r.nodes[i].e; if (!e || !e.dyn) continue; const v = Motors.pointVel(e, pts[i], _v1); v.addScaledVector(g, dt * e.gravScale); cd += J[i].dot(v); }
+        for (let i = 0; i < n; i++) { const e = r.nodes[i].e; if (!e || !e.dyn) continue; let v; if (pinned[i]) { const lv = e.body.linvel(); v = _v1.set(lv.x, lv.y, lv.z); } else { v = Motors.pointVel(e, pts[i], _v1).addScaledVector(g, dt * e.gravScale); } cd += J[i].dot(v); }
         if (wj) cd += Motors.relAngVel(wj, wn) * r.winch.r * (r.winch.dir || 1);
         let lam = -(cd - tgt) / K; const old = acc; acc = Math.min(0, acc + lam); lam = acc - old;
         if (r.reel && r.reel.maxF && -acc / dt > r.reel.maxF * 1.5) { const lim = -r.reel.maxF * 1.5 * dt; lam += lim - acc; acc = lim; }
         if (lam === 0) continue;
-        for (let i = 0; i < n; i++) { const e = r.nodes[i].e; if (!e || !e.dyn) continue; e.body.applyImpulseAtPoint({ x: J[i].x * lam, y: J[i].y * lam, z: J[i].z * lam }, pts[i], true); e.ext.addScaledVector(J[i], lam); }
+        for (let i = 0; i < n; i++) { const e = r.nodes[i].e; if (!e || !e.dyn) continue; const I = { x: J[i].x * lam, y: J[i].y * lam, z: J[i].z * lam }; if (pinned[i]) e.body.applyImpulse(I, true); else e.body.applyImpulseAtPoint(I, pts[i], true); e.ext.addScaledVector(J[i], lam); }
         if (wj) Motors.applyAngImpulse(wj, wn, lam * r.winch.r * (r.winch.dir || 1));
       }
       if (r.reel && len > r.L + 0.05) r.L = len - 0.05; // reel slips if overloaded
@@ -1471,6 +1509,8 @@ const Ropes = {
 const Gears = {
   list: [], nextId: 1,
   support(e) { for (const j of e.joints) if (j.def.kind === 'hinge' || j.def.kind === 'slider') return j.a === e ? j.b : j.a; return null; },
+  // The body that actually carries the reaction: a support held by other joints (e.g. a suspension hub) passes it on to its heaviest partner
+  reactor(e, s) { if (!s || !s.dyn || s.joints.size <= 1) return s; let best = s; for (const j of s.joints) { const o = j.a === s ? j.b : j.a; if (o && o !== e && (!o.dyn || o.mass > best.mass)) best = o; } return best; },
   create(o) { const g = { id: o.id ?? this.nextId++, type: o.type, terms: o.terms.map(t => ({ ...t })), maxT: o.maxT ?? Infinity, clutchKey: o.clutchKey || '', engaged: o.engaged ?? true, ratio: o.ratio ?? 1, lam: 0 }; this.nextId = Math.max(this.nextId, g.id + 1); this.list.push(g); Bus.emit('gearCreated', g); return g; },
   remove(g) { const i = this.list.indexOf(g); if (i >= 0) this.list.splice(i, 1); },
   axis(t, out) { return out.set(...t.ax).applyQuaternion(t.e.q1); },
@@ -1478,22 +1518,26 @@ const Gears = {
     const e = t.e, s = t.s; if (t.lin) { const v = e.body.linvel(); let r = v.x * n.x + v.y * n.y + v.z * n.z; if (s && s.dyn) { const w = s.body.linvel(); r -= w.x * n.x + w.y * n.y + w.z * n.z; } return r; }
     const w = e.body.angvel(); let r = w.x * n.x + w.y * n.y + w.z * n.z; if (s && s.dyn) { const ws = s.body.angvel(); r -= ws.x * n.x + ws.y * n.y + ws.z * n.z; } return r;
   },
+  // a support that is itself held by other joints (e.g. a suspension hub) is treated as rigid for the effective mass
   K(t, n) { if (t.lin) return (t.e.dyn ? 1 / t.e.mass : 0) + (t.s && t.s.dyn ? 1 / t.s.mass : 0); return Motors.invI(t.e, n) + Motors.invI(t.s, n); },
   apply(t, n, P) {
     if (t.lin) { if (t.e.dyn) t.e.body.applyImpulse({ x: n.x * P, y: n.y * P, z: n.z * P }, true); if (t.s && t.s.dyn) t.s.body.applyImpulse({ x: -n.x * P, y: -n.y * P, z: -n.z * P }, true); }
     else { if (t.e.dyn) t.e.body.applyTorqueImpulse({ x: n.x * P, y: n.y * P, z: n.z * P }, true); if (t.s && t.s.dyn) t.s.body.applyTorqueImpulse({ x: -n.x * P, y: -n.y * P, z: -n.z * P }, true); }
   },
-  pre(dt) {
-    for (let it = 0; it < 4; it++) for (const g of this.list) {
+  pre(dt, it = 0) {
+    for (const g of this.list) {
       if (g.terms.some(t => t.e.removed)) { this.remove(g); continue; }
       let engaged = g.engaged; if (g.clutchKey && Input.keys.has(g.clutchKey)) engaged = !engaged; if (g.signal !== undefined && g.signal !== null && g.useSignal) engaged = g.signal > 0.5; g.isEngaged = engaged; if (!engaged) continue;
       let cd = 0, K = 0; const ns = g._ns || (g._ns = g.terms.map(() => V3()));
-      g.terms.forEach((t, i) => { t.s = t.s === undefined ? this.support(t.e) : t.s; const n = this.axis(t, ns[i]); cd += t.c * this.rel(t, n); K += t.c * t.c * this.K(t, n); });
-      if (K <= 0) continue; let lam = -cd / K;
-      if (g.maxT !== Infinity) lam = clamp(lam, -g.maxT * dt, g.maxT * dt);
-      g.terms.forEach((t, i) => this.apply(t, ns[i], t.c * lam)); if (it === 0) g.lam = lam; else g.lam += lam;
+      g.terms.forEach((t, i) => { if (t.s === undefined) t.s = this.reactor(t.e, this.support(t.e)); const n = this.axis(t, ns[i]); cd += t.c * this.rel(t, n); K += t.c * t.c * this.K(t, n); });
+      if (K <= 0) continue;
+      if (it === 0) { g.err = clamp((g.err || 0) + cd * dt, -0.3, 0.3); g.bias = -0.15 * g.err / dt; }
+      cd -= g.bias || 0;
+      if (it === 0) { g.acc = (g.lamPrev || 0) * 0.99; if (g.acc) { g.terms.forEach((t, i) => this.apply(t, ns[i], t.c * g.acc)); cd = -(g.bias || 0); g.terms.forEach((t, i) => cd += t.c * this.rel(t, ns[i])); } } // warm start
+      const lim = g.maxT !== Infinity ? g.maxT * dt : Infinity; const old = g.acc; g.acc = clamp(g.acc - cd / K, -lim, lim); const lam = g.acc - old;
+      g.terms.forEach((t, i) => this.apply(t, ns[i], t.c * lam)); g.lam = g.acc;
     }
-    for (const g of this.list) g.torque = Math.abs(g.lam / dt);
+    if (it === Motors.iters - 1) for (const g of this.list) { g.torque = Math.abs(g.lam / dt); g.lamPrev = g.isEngaged ? g.acc : 0; }
   },
   // Auto-detect a coupling between two entities (gear-gear, gear-rack, pulley/wheel belts, worm)
   link(a, b, forceType) {
@@ -1610,10 +1654,10 @@ const BEH = {
     step(e, b) { const k = b.key && Input.keys.has(b.key); if (k && !b._was) { b.on = !b.on; Audio.click(); } b._was = k; const lv = e.mesh.getObjectByName('lever'); if (lv) lv.rotation.z = b.on ? -0.6 : 0.6; e.mat3.emissive?.setHex(b.on ? 0x226622 : 0); },
   },
   button: {
-    fields: [['hold', 'Pulse length (s)', 'num', 0.05, 10], fieldKey('key')], out: (e, b) => b._t > 0 || (b.key && Input.keys.has(b.key)) || e.cfMag > 20 ? 1 : 0, click(e, b) { b._t = b.hold; Audio.click(); },
+    fields: [['hold', 'Pulse length (s)', 'num', 0.05, 10], fieldKey('key')], out: (e, b) => b._t > 0 || (b.key && Input.keys.has(b.key)) || (e.cfLast || 0) > 20 ? 1 : 0, click(e, b) { b._t = b.hold; Audio.click(); },
     step(e, b, dt) { b._t = Math.max(0, (b._t || 0) - dt); const cap = e.mesh.getObjectByName('cap'); if (cap) cap.position.y = BEH.button.out(e, b) ? 0.02 : 0.06; },
   },
-  plate: { fields: [['threshold', 'Trigger mass (kg)', 'num', 0.1, 10000]], out: (e, b) => (e.cfMag / 9.81 >= b.threshold ? 1 : 0), step(e, b) { b._m = e.cfMag / 9.81; e.mat3.emissive?.setHex(BEH.plate.out(e, b) ? 0x335500 : 0); } },
+  plate: { fields: [['threshold', 'Trigger mass (kg)', 'num', 0.1, 10000]], out: (e, b) => ((e.cfLast || 0) / 9.81 >= b.threshold ? 1 : 0), step(e, b) { b._m = (e.cfLast || 0) / 9.81; e.mat3.emissive?.setHex(BEH.plate.out(e, b) ? 0x335500 : 0); } },
   timer: { fields: [['period', 'Period (s)', 'num', 0.05, 600], ['duty', 'Duty (0-1)', 'num', 0, 1], ['once', 'One-shot delay', 'bool']], out: (e, b) => { const t = World.time - e.created; return b.once ? (t >= b.period ? 1 : 0) : ((t % b.period) / b.period < b.duty ? 1 : 0); } },
   sensor: {
     fields: [['mode', 'Measures', 'sel', ['speed', 'distance', 'angle', 'force', 'height']], ['threshold', 'Threshold', 'num', -1e6, 1e6], ['range', 'Range (m)', 'num', 0.1, 100], ['analog', 'Analog output', 'bool']],
@@ -1623,7 +1667,7 @@ const BEH = {
       if (b.mode === 'speed') { const v = host.body.linvel(); b._v = Math.hypot(v.x, v.y, v.z); }
       else if (b.mode === 'distance') { const d = localDir(e, 0, 0, 1, _v1); const o = _v2.copy(e.p1).addScaledVector(d, e.half.z + 0.02); const hit = World.world.castRay(new R.Ray(rv(o), rv(d)), b.range, true, undefined, undefined, e.cols[0]); b._v = hit ? hit.timeOfImpact : b.range; b._hit = o.clone().addScaledVector(d, b._v); }
       else if (b.mode === 'angle') { b._v = Math.acos(clamp(localDir(host, 0, 1, 0, _v1).y, -1, 1)) / DEG; }
-      else if (b.mode === 'force') b._v = host.cfMag; else b._v = host.p1.y;
+      else if (b.mode === 'force') b._v = host.cfLast || 0; else b._v = host.p1.y;
     },
   },
   controller: {
@@ -1638,7 +1682,7 @@ const BEH = {
   tnt: {
     fields: [['power', 'Power', 'num', 0.1, 20], ['radius', 'Radius (m)', 'num', 1, 40], ['fuse', 'Fuse (s)', 'num', 0, 30], fieldKey('key', 'Detonate key'), ['impact', 'Impact trigger (m/s²)', 'num', 0, 100000]],
     step(e, b, dt) { if ((b.key && Input.keys.has(b.key)) || e.input > 0.5 || e.temp > 250) b._arm = true; if (b._arm) { b._t = (b._t ?? b.fuse) - dt; if (Math.random() < 0.5) FX.sparks(e.p1.clone().add(localDir(e, 0, e.half.y, 0, _v1)), 1, 0.3); if (b._t <= 0) this.detonate(e); } },
-    detonate(e) { if (e.removed || e._boom) return; e._boom = true; const b = e.beh.tnt; queueMicrotask(() => { const p = e.p1.clone(); Entities.remove(e); Explosion.at(p, b.power, b.radius); }); },
+    detonate(e) { if (e.removed || e._boom) return; e._boom = true; const b = e.beh.tnt; World.defer(() => { const p = e.p1.clone(); Entities.remove(e); Explosion.at(p, b.power, b.radius); }); },
   },
   cannon: {
     fields: [['speed', 'Muzzle speed (m/s)', 'num', 1, 300], ['ball', 'Ball radius (m)', 'num', 0.03, 1], ['mat', 'Ammo material', 'sel', MAT_IDS], fieldKey('key', 'Fire key'), ['auto', 'Auto-fire interval (s, 0=off)', 'num', 0, 30]],
@@ -1663,7 +1707,7 @@ const BEH = {
   pump: { fields: [['rate', 'Rate (particles/s)', 'num', 0, 200], ['on', 'Running', 'bool'], ['speed', 'Jet speed (m/s)', 'num', 0, 30]], },
   faucet: {
     fields: [['rate', 'Rate (particles/s)', 'num', 0, 200], ['on', 'Open', 'bool'], ['speed', 'Jet speed (m/s)', 'num', 0, 30]],
-    step(e, b, dt) { const open = b.on || e.input > 0.5 || e.pipeFlow; if (!open) return; b._acc = (b._acc || 0) + b.rate * dt * (e.pipeFlow ?? 1); while (b._acc >= 1) { b._acc--; const d = localDir(e, 0, 0, 1, V3()); const p = e.p1.clone().addScaledVector(d, e.half.z + 0.12).add(V3(srange(-.03, .03), srange(-.03, .03), srange(-.03, .03))); Fluids.emit(p, d.multiplyScalar(b.speed)); } },
+    step(e, b, dt) { const flow = e.pipeFlow ? e.pipeFlow : (b.on || e.input > 0.5 ? 1 : 0); if (!flow) return; b._acc = (b._acc || 0) + b.rate * dt * flow; while (b._acc >= 1) { b._acc--; const d = localDir(e, 0, 0, 1, V3()); const p = e.p1.clone().addScaledVector(d, e.half.z + 0.12).add(V3(srange(-.03, .03), srange(-.03, .03), srange(-.03, .03))); Fluids.emit(p, d.multiplyScalar(b.speed)); } },
   },
   valve: { fields: [['open', 'Open', 'bool'], fieldKey('key', 'Toggle key')], out: (e, b) => (b.open || e.input > 0.5) ? 1 : 0, click(e, b) { b.open = !b.open; Audio.click(); }, step(e, b) { const k = b.key && Input.keys.has(b.key); if (k && !b._was) b.open = !b.open; b._was = k; const h = e.mesh.getObjectByName('lever'); if (h) h.rotation.y = b.open ? 0 : Math.PI / 2; } },
   airtank: { fields: [['P', 'Pressure (bar)', 'num', 0, 300], ['V', 'Volume (L)', 'num', 1, 10000], ['maxP', 'Burst pressure (bar)', 'num', 1, 500]], step(e, b) { if (b.P > b.maxP && !World.noBreak) { b.P = 0; Explosion.at(e.p1.clone(), 0.6, 4); FX.shards(e.p1, 0xdddddd, 20); toast('💥 Air tank burst!'); } } },
@@ -1788,14 +1832,18 @@ const Fluids = {
     for (const e of Entities.awake) {
       if (!e.dyn) continue; const p = e.p1, wl = Terrain.waterLevel(p.x, p.z);
       const wasIn = e._wet || false;
-      if (p.y - e.radius > wl) { e._wet = false; continue; }
-      const h = e.half, disp = (e.extra.displace ?? e.vol) * (e.beh.ballast ? 1 : 1), n = 9, Vs = disp / n;
+      if (p.y - e.radius - e.cOff.length() > wl) { e._wet = false; e.sub = 0; continue; }
+      const h = e.half, disp = e.extra.displace ?? e.vol, n = 9, Vs = disp / n, qi = _q2.copy(e.q1).invert();
       let sub = 0;
       for (let i = 0; i < n; i++) {
-        if (i < 8) _v1.set((i & 1 ? 1 : -1) * h.x * 0.7, (i & 2 ? 1 : -1) * h.y * 0.7, (i & 4 ? 1 : -1) * h.z * 0.7).applyQuaternion(e.q1).add(p); else _v1.copy(p);
+        if (i < 8) _v1.set((i & 1 ? 1 : -1) * h.x * 0.7, (i & 2 ? 1 : -1) * h.y * 0.7, (i & 4 ? 1 : -1) * h.z * 0.7).add(e.cOff).applyQuaternion(e.q1).add(p); else _v1.copy(e.cOff).applyQuaternion(e.q1).add(p);
         const depth = wl - _v1.y; if (depth <= 0) continue; const f = clamp(depth / (h.y * 0.8 + 0.05), 0, 1); sub += f / n;
-        const v = Motors.pointVel(e, _v1, _v2); const B = rho * g * Vs * f; const drag = (rho * Vs * 2.5 + e.mass / n * 0.8) * f;
-        const ix = (-v.x * drag) * dt, iy = (B - v.y * drag) * dt, iz = (-v.z * drag) * dt;
+        // drag: quadratic in the body's own axes (low fore-aft, high sideways = keel) + light vertical damping
+        const v = Motors.pointVel(e, _v1, _v2); const B = rho * g * Vs * f; const lv = _v3.copy(v).applyQuaternion(qi);
+        const Ax = 4 * h.y * h.z / n, Ay = 4 * h.x * h.z / n, Az = 4 * h.x * h.y / n, q = 0.5 * rho * f;
+        _v4.set(-q * 0.4 * Ax * Math.abs(lv.x) * lv.x, -q * 1.2 * Ay * Math.abs(lv.y) * lv.y, -q * 1.0 * Az * Math.abs(lv.z) * lv.z).applyQuaternion(e.q1);
+        const lin = (rho * Vs * 0.8 + e.mass / n * 0.3) * f; const cap = e.mass / n / dt * 0.5; _v4.clampLength(0, cap * Math.max(1, v.length()));
+        const ix = (_v4.x - v.x * lin * 0.15) * dt, iy = (B + _v4.y - v.y * lin) * dt, iz = (_v4.z - v.z * lin * 0.15) * dt;
         e.body.applyImpulseAtPoint({ x: ix, y: iy, z: iz }, rv(_v1), true); e.ext.x += ix; e.ext.y += iy; e.ext.z += iz;
       }
       e._wet = sub > 0.15; e.sub = sub;
@@ -2055,7 +2103,7 @@ const Disasters = {
     const T = this.active.tornado; if (T && this.funnel) { this.funnel.position.copy(T.pos); this.funnel.rotation.y += dt * 4; this.funnel.scale.setScalar(Math.max(0.05, Math.min(1, T.t / 3, (T.dur - T.t) / 3))); for (let i = 0; i < 6; i++) { const a = vrange(0, 6.28), r = vrange(1, 8), y = vrange(0, 25); Particles.norm.emit(T.pos.x + Math.cos(a) * r * (1 + y / 20), T.pos.y + y, T.pos.z + Math.sin(a) * r * (1 + y / 20), -Math.sin(a) * 15, 4, Math.cos(a) * 15, 0x8a8070, vrange(0.8, 2), vrange(0.6, 1.4), -1, 0.3, 1, 0.4); } }
   },
 };
-BEH.meteor = { fields: [['power', 'Power', 'num', 0.1, 10]], step(e, b) { if (e.cfMag > 50 || (e.p1.y < Terrain.waterLevel(e.p1.x, e.p1.z))) { if (!e._boom) { e._boom = true; queueMicrotask(() => { const p = e.p1.clone(); Entities.remove(e); Explosion.at(p, b.power, 3 + b.power * 3); }); } } }, render(e) { FX.fire(e.mesh.position, 1.2); FX.smoke(e.mesh.position, 1, 0x444444); } };
+BEH.meteor = { fields: [['power', 'Power', 'num', 0.1, 10]], step(e, b) { if ((e.cfLast || 0) > 50 || (e.p1.y < Terrain.waterLevel(e.p1.x, e.p1.z))) { if (!e._boom) { e._boom = true; World.defer(() => { const p = e.p1.clone(); Entities.remove(e); Explosion.at(p, b.power, 3 + b.power * 3); }); } } }, render(e) { FX.fire(e.mesh.position, 1.2); FX.smoke(e.mesh.position, 1, 0x444444); } };
 
 // ==== Planets mode: N-body gravity with moons + slingshot challenge ==========================
 const Planets = {
@@ -2247,7 +2295,7 @@ const Ragdoll = {
 
 // ==== Test Arena: walled 20x20 m checkerboard with measuring grid (kinematic for earthquakes) ====
 const Arena = {
-  group: null, offset: V3(), bodies: [], paddle: null, ang: 0,
+  group: null, offset: V3(), bodies: [], paddle: null, ang: 0, noPick: new Set(),
   inside(p) { return Math.abs(p.x) < 10 && Math.abs(p.z) < 10 && p.y < 12; },
   floorY() { return this.offset.y; },
   init() {
@@ -2255,7 +2303,7 @@ const Arena = {
     const W = World.world;
     const floorTex = Tex.get('checker').clone(); floorTex.needsUpdate = true; floorTex.repeat.set(10, 10);
     const mk = (size, pos, mat, visible = true) => {
-      const b = W.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(...pos)); W.createCollider(R.ColliderDesc.cuboid(size[0] / 2, size[1] / 2, size[2] / 2).setFriction(0.7).setRestitution(0.2), b);
+      const b = W.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(...pos)); const col = W.createCollider(R.ColliderDesc.cuboid(size[0] / 2, size[1] / 2, size[2] / 2).setFriction(0.7).setRestitution(0.2), b); if (this.bodies.length) this.noPick.add(col.handle);
       const m = new THREE.Mesh(new THREE.BoxGeometry(...size), mat); m.position.set(...pos); m.receiveShadow = true; m.castShadow = visible; m.visible = visible; g.add(m); this.bodies.push({ b, m, base: V3(...pos) }); return b;
     };
     mk([20.6, 1, 20.6], [0, -0.5, 0], new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.7 }));
@@ -2358,7 +2406,7 @@ part('flywheel', { name: 'Flywheel', cat: 'Wheels & Gears', icon: '🎡', cost: 
 // ---------- Wheels & Gears (rotating parts use local X as axle) ----------
 part('wheelS', { name: 'Small Wheel', cat: 'Wheels & Gears', icon: '🛞', cost: 8, ent: { kind: 'wheel', params: { r: 0.25, w: 0.15 }, mat: 'rubber', mass: 6 } });
 part('wheelL', { name: 'Large Wheel', cat: 'Wheels & Gears', icon: '🛞', cost: 14, ent: { kind: 'wheel', params: { r: 0.45, w: 0.3 }, mat: 'rubber', mass: 20 } });
-part('tire', { name: 'Grip Tire', cat: 'Wheels & Gears', icon: '🛞', cost: 18, ent: { kind: 'wheel', params: { r: 0.4, w: 0.35 }, mat: 'rubber', color: 0x1a1a1a, mass: 18, extra: { grip: 1 } }, deco(e) { e.cols.forEach(c => c.setFriction(1.6)); } });
+part('tire', { name: 'Grip Tire', cat: 'Wheels & Gears', icon: '🛞', cost: 18, ent: { kind: 'wheel', params: { r: 0.4, w: 0.35 }, mat: 'rubber', color: 0x1a1a1a, mass: 18, fricMul: 1.7 } });
 part('axle', { name: 'Axle Rod', cat: 'Wheels & Gears', icon: '➖', cost: 4, ent: { kind: 'cylinder', params: { r: 0.04, h: 1.5 }, mat: 'metal' }, rotQ: QZ(90) });
 part('gearS', { name: 'Spur Gear 12T', cat: 'Wheels & Gears', icon: '⚙️', cost: 10, ent: { kind: 'gear', params: { teeth: 12, m: 0.05, w: 0.1 }, mat: 'metal', mass: 4 }, axle: true });
 part('gearM', { name: 'Spur Gear 20T', cat: 'Wheels & Gears', icon: '⚙️', cost: 14, ent: { kind: 'gear', params: { teeth: 20, m: 0.05, w: 0.1 }, mat: 'metal', mass: 8 }, axle: true });
@@ -2376,9 +2424,10 @@ part('pblock', { name: 'Movable Pulley Block', cat: 'Machines', icon: '🪝', co
 part('atwood', { name: 'Atwood Machine', cat: 'Machines', icon: '⚖️', cost: 40, size: [1.2, 3.4, 0.5], desc: '5 kg vs 6 kg over a pulley: a = g(m2-m1)/(m1+m2) = 0.89 m/s²', spawn(at, q) { const b = new Bld(at, q); const st = b.e('compound', { parts: [{ t: 'box', d: [0.1, 3.2, 0.1], p: [0, 1.6, -0.25] }, { t: 'box', d: [0.8, 0.1, 0.4], p: [0, 0.05, -0.1] }] }, 'wood', 0, 0, 0, { frozen: true, part: 'stand' }); const p = b.e('pulley', { r: 0.25, w: 0.08 }, 'metal', 0, 3.1, 0, { frozen: true, q: QY(90), part: 'pulley' }); const m1 = b.box(0.2, 0.2, 0.2, 'metal', -0.25, 1.6, 0, { mass: 5, part: 'w5' }), m2 = b.box(0.22, 0.22, 0.22, 'metal', 0.25, 1.9, 0, { mass: 6, part: 'w5', color: 0xd06040 }); b.rope([[m1, -0.25, 1.7, 0], [p, 0, 3.1, 0, 0.25], [m2, 0.25, 2.01, 0]]); return b.ents; } });
 part('tackle', { name: 'Block & Tackle (MA 4)', cat: 'Machines', icon: '🏗️', cost: 90, size: [1.6, 5, 1], desc: 'Compound pulley: 4 rope segments hold the load — lift 200 kg with ~50 kg', spawn(at, q) { const b = new Bld(at, q); const top = b.box(1.6, 0.2, 0.4, 'metal', 0, 5, 0, { frozen: true, part: 'beam' }); const f1 = b.e('pulley', { r: 0.2, w: 0.08 }, 'metal', -0.25, 4.7, 0, { frozen: true, q: QY(90) }), f2 = b.e('pulley', { r: 0.2, w: 0.08 }, 'metal', 0.25, 4.7, 0, { frozen: true, q: QY(90) }); const mv = b.e('compound', { parts: [{ t: 'cyl', d: [0.2, 0.08], p: [-0.25, 0, 0], q: [0, 0, Math.SQRT1_2, Math.SQRT1_2] }, { t: 'cyl', d: [0.2, 0.08], p: [0.25, 0, 0], q: [0, 0, Math.SQRT1_2, Math.SQRT1_2] }, { t: 'box', d: [0.7, 0.08, 0.08], p: [0, -0.15, 0] }] }, 'metal', 0, 2.2, 0, { mass: 6, part: 'pblock' }); const load = b.box(0.6, 0.6, 0.6, 'metal', 0, 1.4, 0, { mass: 200, part: 'w100', label: 'Load 200 kg' }); b.j('rope', load, mv, 0, 1.7, 0, undefined, undefined, { pb: b.P(0, 2.05, 0) }); const eff = b.box(0.3, 0.3, 0.3, 'metal', 0.75, 2.5, 0, { mass: 52, part: 'w50', label: 'Effort 52 kg', color: 0xd06040 }); b.rope([[top, -0.6, 4.9, 0], [mv, -0.25, 2.2, 0, 0.2], [f1, -0.25, 4.7, 0, 0.2], [mv, 0.25, 2.2, 0, 0.2], [f2, 0.25, 4.7, 0, 0.2], [eff, 0.75, 2.65, 0]]); return b.ents; } });
 part('lever', { name: 'Lever / See-saw', cat: 'Machines', icon: '⚖️', cost: 15, size: [4, 0.8, 0.5], desc: 'Plank on a fulcrum — move the fulcrum in the properties panel', spawn(at, q) { const b = new Bld(at, q); const f = b.e('wedge', { x: 0.5, y: 0.5, z: 0.5 }, 'concrete', 0, 0.25, 0, { frozen: true, q: QZ(0), part: 'fulcrum' }); const p = b.box(4, 0.08, 0.4, 'wood', 0, 0.56, 0, { part: 'plank', beh: { lever: { offset: 0 } } }); b.j('hinge', p, f, 0.25, 0.52, 0, [0, 0, 1]); return b.ents; } });
-part('screwjack', { name: 'Screw Jack', cat: 'Machines', icon: '🔧', cost: 50, size: [1, 1.6, 1], desc: 'Crank (U/J) turns a screw: huge mechanical advantage', spawn(at, q) { const b = new Bld(at, q); const base = b.box(0.8, 0.2, 0.8, 'metal', 0, 0.1, 0, { frozen: true, part: 'base' }); const screw = b.e('compound', { parts: [{ t: 'cyl', d: [0.06, 1.0], p: [0, 0, 0] }, { t: 'box', d: [0.7, 0.06, 0.7], p: [0, 0.52, 0] }] }, 'metal', 0, 0.75, 0, { mass: 15, part: 'screw' }); b.j('slider', screw, base, 0, 0.3, 0, [0, 1, 0], { lo: -0.1, hi: 0.8 }); const crank = b.e('compound', { parts: [{ t: 'cyl', d: [0.12, 0.08], p: [0, 0, 0] }, { t: 'box', d: [0.5, 0.04, 0.04], p: [0.25, 0, 0] }, { t: 'cyl', d: [0.02, 0.15], p: [0.5, 0.07, 0] }] }, 'metal', 0, 0.25, 0, { mass: 2, part: 'crank' }); b.j('motor', crank, base, 0, 0.25, 0, [0, 1, 0], { rpm: 40, torque: 40, keyF: 'KeyU', keyB: 'KeyJ', brake: true }); Gears.create({ type: 'screw', terms: [{ e: crank, ax: [0, 1, 0], c: 0.01 / (2 * Math.PI) }, { e: screw, ax: [0, 1, 0], lin: true, c: -1 }], ratio: 628 }); b.e('box', { x: 0.5, y: 0.5, z: 0.5 }, 'metal', 0, 1.6, 0, { mass: 500, part: 'w500', label: '500 kg' }); return b.ents; } });
-part('winchcrank', { name: 'Winch with Crank', cat: 'Machines', icon: '🎣', cost: 45, size: [1.4, 3, 1], desc: 'Drum + crank: U/J winds the rope. Torque × drum radius = lift', spawn(at, q) { const b = new Bld(at, q); const fr = b.e('compound', { parts: [{ t: 'box', d: [0.1, 3, 0.1], p: [-0.5, 1.5, 0] }, { t: 'box', d: [0.1, 3, 0.1], p: [0.5, 1.5, 0] }] }, 'wood', 0, 0, 0, { frozen: true, part: 'frame' }); const drum = b.e('wheel', { r: 0.12, w: 0.8 }, 'wood', 0, 2.8, 0, { mass: 8, part: 'drum' }); const j = b.j('motor', drum, fr, 0, 2.8, 0, [1, 0, 0], { rpm: 30, torque: 150, keyF: 'KeyU', keyB: 'KeyJ', brake: true }); const load = b.box(0.4, 0.4, 0.4, 'metal', 0, 1.0, 0.12, { mass: 80, part: 'w50', label: '80 kg' }); b.rope([[drum, 0, 2.8, 0.12], [load, 0, 1.2, 0.12]], { winch: { j: j.id, r: 0.12, dir: 1 } }); return b.ents; } });
+part('screwjack', { name: 'Screw Jack', cat: 'Machines', icon: '🔧', cost: 50, size: [1, 1.6, 1], desc: 'Crank (U/J) turns a screw: huge mechanical advantage', spawn(at, q) { const b = new Bld(at, q); const base = b.box(0.8, 0.2, 0.8, 'metal', 0, 0.1, 0, { frozen: true, part: 'base' }); const screw = b.e('compound', { parts: [{ t: 'cyl', d: [0.06, 1.0], p: [0, 0, 0] }, { t: 'box', d: [0.7, 0.06, 0.7], p: [0, 0.52, 0] }] }, 'metal', 0, 0.75, 0, { mass: 15, part: 'screw' }); b.j('slider', screw, base, 0, 0.3, 0, [0, 1, 0], { lo: -0.1, hi: 0.8 }); const crank = b.e('compound', { parts: [{ t: 'cyl', d: [0.12, 0.08], p: [0, 0, 0] }, { t: 'box', d: [0.5, 0.04, 0.04], p: [0.25, 0, 0] }, { t: 'cyl', d: [0.02, 0.15], p: [0.5, 0.07, 0] }] }, 'metal', 0, 0.25, 0, { mass: 2, part: 'crank' }); b.j('motor', crank, base, 0, 0.25, 0, [0, 1, 0], { rpm: 60, torque: 90, keyF: 'KeyU', keyB: 'KeyJ', brake: true }); Gears.create({ type: 'screw', terms: [{ e: crank, ax: [0, 1, 0], c: -0.04 / (2 * Math.PI) }, { e: screw, ax: [0, 1, 0], lin: true, c: -1 }], ratio: 157 }); b.e('box', { x: 0.5, y: 0.5, z: 0.5 }, 'metal', 0, 1.6, 0, { mass: 500, part: 'w500', label: '500 kg' }); return b.ents; } });
+part('winchcrank', { name: 'Winch with Crank', cat: 'Machines', icon: '🎣', cost: 45, size: [1.4, 3, 1], desc: 'Drum + crank: U/J winds the rope. Torque × drum radius = lift', spawn(at, q) { const b = new Bld(at, q); const fr = b.e('compound', { parts: [{ t: 'box', d: [0.1, 3, 0.1], p: [-0.5, 1.5, 0] }, { t: 'box', d: [0.1, 3, 0.1], p: [0.5, 1.5, 0] }] }, 'wood', 0, 0, 0, { frozen: true, part: 'frame' }); const drum = b.e('wheel', { r: 0.12, w: 0.8 }, 'metal', 0, 2.8, 0, { mass: 8, part: 'drum', color: 0x8a7a60 }); const j = b.j('motor', drum, fr, 0, 2.8, 0, [1, 0, 0], { rpm: 30, torque: 300, keyF: 'KeyU', keyB: 'KeyJ', brake: true }); const load = b.box(0.4, 0.4, 0.4, 'metal', 0, 1.0, 0.12, { mass: 80, part: 'w50', label: '80 kg' }); b.rope([[drum, 0, 2.8, 0.12], [load, 0, 1.2, 0.12]], { winch: { j: j.id, r: 0.12, dir: 1 } }); return b.ents; } });
 part('door', { name: 'Door', cat: 'Machines', icon: '🚪', cost: 20, size: [1.2, 2.2, 0.2], spawn(at, q) { const b = new Bld(at, q); const post = b.box(0.1, 2.2, 0.1, 'wood', -0.6, 1.1, 0, { frozen: true, part: 'post' }); const d = b.box(1, 2, 0.06, 'wood', 0, 1.05, 0, { part: 'door', color: 0x8a5a30 }); b.j('hinge', d, post, -0.55, 1.05, 0, [0, 1, 0], { friction: 2 }); return b.ents; } });
+part('lockdoor', { name: 'Lockable Door', cat: 'Machines', icon: '🔐', cost: 30, size: [1.2, 2.2, 0.2], desc: 'Servo lock holds it shut; Y unlocks and swings it open', spawn(at, q) { const b = new Bld(at, q); const post = b.box(0.1, 2.2, 0.1, 'metal', -0.6, 1.1, 0, { frozen: true, part: 'post' }); const d = b.box(1, 2, 0.06, 'wood', 0, 1.05, 0, { part: 'door', color: 0x6a3a20, label: '🔒' }); b.j('servo', d, post, -0.55, 1.05, 0, [0, 1, 0], { angle: 0, angle2: 95, keyF: 'KeyY', torque: 3000, speed: 90 }); return b.ents; } });
 part('trapdoor', { name: 'Trapdoor', cat: 'Machines', icon: '🕳️', cost: 25, size: [1.4, 1.1, 1.2], desc: 'Servo-held trapdoor: wire a switch or press T to drop', spawn(at, q) { const b = new Bld(at, q); const f = b.e('compound', { parts: [{ t: 'box', d: [0.1, 1, 1.2], p: [-0.65, 0.5, 0] }, { t: 'box', d: [0.1, 1, 1.2], p: [0.65, 0.5, 0] }] }, 'wood', 0, 0, 0, { frozen: true, part: 'frame' }); const d = b.box(1.18, 0.06, 1.1, 'wood', 0, 1.0, 0, { part: 'trapdoor', color: 0x8a5a30 }); b.j('servo', d, f, -0.58, 1.0, 0, [0, 0, 1], { angle: 0, angle2: -90, keyF: 'KeyT', torque: 800 }); b.box(0.4, 0.4, 0.4, 'wood', 0, 1.3, 0, { part: 'box' }); return b.ents; } });
 part('swing', { name: 'Swing Seat', cat: 'Machines', icon: '🪑', cost: 20, size: [2.4, 3, 1], spawn(at, q) { const b = new Bld(at, q); const fr = b.e('compound', { parts: [{ t: 'box', d: [0.12, 3, 0.12], p: [-1.1, 1.5, 0] }, { t: 'box', d: [0.12, 3, 0.12], p: [1.1, 1.5, 0] }, { t: 'box', d: [2.34, 0.12, 0.12], p: [0, 3, 0] }] }, 'wood', 0, 0, 0, { frozen: true, part: 'frame' }); const s = b.box(0.6, 0.05, 0.3, 'wood', 0, 0.8, 0, { part: 'seat' }); b.j('rope', s, fr, -0.28, 0.82, 0, undefined, undefined, { pb: b.P(-0.28, 2.94, 0) }); b.j('rope', s, fr, 0.28, 0.82, 0, undefined, undefined, { pb: b.P(0.28, 2.94, 0) }); return b.ents; } });
 part('engine', { name: 'Engine (crank + pistons)', cat: 'Machines', icon: '🏎️', cost: 120, size: [1.4, 1.6, 0.8], desc: 'Crankshaft, connecting rods and pistons in cylinders', spawn(at, q) { const b = new Bld(at, q); const blk = b.e('compound', { parts: [{ t: 'box', d: [1.4, 0.2, 0.8], p: [0, 0.1, 0] }, { t: 'box', d: [0.06, 1.4, 0.6], p: [-0.68, 0.8, 0] }, { t: 'box', d: [0.06, 1.4, 0.6], p: [0.68, 0.8, 0] }] }, 'metal', 0, 0, 0, { frozen: true, part: 'block', color: 0x606870 }); const crank = b.e('compound', { parts: [{ t: 'cyl', d: [0.05, 1.3], q: [0, 0, Math.SQRT1_2, Math.SQRT1_2] }, { t: 'box', d: [0.05, 0.3, 0.1], p: [-0.3, 0.1, 0] }, { t: 'box', d: [0.05, 0.3, 0.1], p: [0.3, -0.1, 0] }] }, 'metal', 0, 0.55, 0, { mass: 20, part: 'crankshaft', angDamp: 0.1 }); b.j('motor', crank, blk, 0, 0.55, 0, [1, 0, 0], { rpm: 90, torque: 400, always: true }); for (const [x, s] of [[-0.3, 1], [0.3, -1]]) { const rod = b.e('capsule', { r: 0.03, h: 0.45 }, 'metal', x + 0.06 * Math.sign(x), 0.55 + s * 0.2 + 0.3, 0, { mass: 2, part: 'conrod' }); const pist = b.e('cylinder', { r: 0.12, h: 0.18 }, 'metal', x + 0.06 * Math.sign(x), 0.55 + s * 0.2 + 0.62, 0, { mass: 3, part: 'piston', color: 0xc0c8d0 }); b.j('ball', rod, crank, x + 0.06 * Math.sign(x), 0.55 + s * 0.2, 0).raws.forEach(r => r.setContactsEnabled(false)); b.j('ball', pist, rod, x + 0.06 * Math.sign(x), 0.55 + s * 0.2 + 0.55, 0).raws.forEach(r => r.setContactsEnabled(false)); b.j('slider', pist, blk, x + 0.06 * Math.sign(x), 0.55 + s * 0.2 + 0.62, 0, [0, 1, 0], { lo: -0.6, hi: 0.6 }); } return b.ents; } });
@@ -2444,7 +2493,7 @@ part('airtank', { name: 'Air Tank', cat: 'Fluids & Air', icon: '🧯', cost: 20,
 part('compressor', { name: 'Compressor', cat: 'Fluids & Air', icon: '🌬️', cost: 30, ent: { kind: 'box', params: { x: 0.5, y: 0.4, z: 0.4 }, mat: 'metal', color: 0x308040, mass: 30, beh: { compressor: { rate: 40, on: true } } } });
 part('gauge', { name: 'Pressure Gauge', cat: 'Fluids & Air', icon: '⏲️', cost: 6, ent: { kind: 'cylinder', params: { r: 0.15, h: 0.06 }, mat: 'metal', color: 0xe0e0e0, frozen: true, beh: { gauge: {} } }, rotQ: QX(90), deco(e, m) { const n = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.12, 0.01), new THREE.MeshBasicMaterial({ color: 0xff2020 })); n.geometry.translate(0, 0.05, 0); n.name = 'needle'; n.position.y = 0.035; n.rotation.x = -Math.PI / 2; const g = new THREE.Group(); g.add(n); m.add(g); n.parent.rotation.x = 0; } });
 part('pneupiston', { name: 'Pneumatic Piston', cat: 'Fluids & Air', icon: '💨', cost: 30, desc: 'Force = pressure × area. Hose it (Wire tool) from an air tank / valve', ...actuator(0, 0x30a060, { pneumatic: true, area: 0.005, keyF: '', keyB: '' }) });
-part('pneudemo', { name: 'Pneumatic Demo', cat: 'Fluids & Air', icon: '💨', cost: 80, size: [2, 1.4, 1], desc: 'Compressor → tank → valve → piston, with a gauge', spawn(at, q) { const b = new Bld(at, q); const cp = b.e('box', { x: 0.5, y: 0.4, z: 0.4 }, 'metal', -0.9, 0.2, 0, { color: 0x308040, mass: 30, part: 'compressor', beh: { compressor: { rate: 40, on: true } } }); const tk = b.e('cylinder', { r: 0.2, h: 0.8 }, 'metal', -0.3, 0.4, 0, { color: 0x3080c0, mass: 15, part: 'airtank', beh: { airtank: { P: 6, V: 50, maxP: 40 } } }); const va = b.e('box', { x: 0.25, y: 0.25, z: 0.25 }, 'metal', 0.2, 0.125, 0, { color: 0xc03030, frozen: true, part: 'valve', beh: { valve: { open: false, key: 'KeyV' } } }); const ga = b.e('cylinder', { r: 0.15, h: 0.06 }, 'metal', -0.3, 1.0, 0.25, { q: QX(90), frozen: true, part: 'gauge', beh: { gauge: {} } }); const pp = PARTS.pneupiston.spawn(b.P(0.8, 0, 0), q); Logic.add(cp.id, tk.id, 'air'); Logic.add(tk.id, va.id, 'air'); Logic.add(va.id, pp[1].id, 'air'); Logic.add(tk.id, ga.id, 'air'); b.e('box', { x: 0.4, y: 0.4, z: 0.4 }, 'wood', 0.8, 1.5, 0, { part: 'box' }); toast('Press V to open the valve'); return [...b.ents, ...pp]; } });
+part('pneudemo', { name: 'Pneumatic Demo', cat: 'Fluids & Air', icon: '💨', cost: 80, size: [2, 1.4, 1], desc: 'Compressor → tank → valve → piston, with a gauge', spawn(at, q) { const b = new Bld(at, q); const cp = b.e('box', { x: 0.5, y: 0.4, z: 0.4 }, 'metal', -0.9, 0.2, 0, { color: 0x308040, mass: 30, part: 'compressor', beh: { compressor: { rate: 40, on: true } } }); const tk = b.e('cylinder', { r: 0.2, h: 0.8 }, 'metal', -0.3, 0.4, 0, { color: 0x3080c0, mass: 15, part: 'airtank', beh: { airtank: { P: 6, V: 50, maxP: 40 } } }); const va = b.e('box', { x: 0.25, y: 0.25, z: 0.25 }, 'metal', 0.2, 0.125, 0, { color: 0xc03030, frozen: true, part: 'valve', beh: { valve: { open: false, key: 'KeyV' } } }); const ga = b.e('cylinder', { r: 0.15, h: 0.06 }, 'metal', -0.3, 1.0, 0.25, { q: QX(90), frozen: true, part: 'gauge', beh: { gauge: {} } }); const pp = PARTS.pneupiston.spawn(b.P(0.8, 0, 0), q); Entities.setFrozen(pp[0], true); Logic.add(cp.id, tk.id, 'air'); Logic.add(tk.id, va.id, 'air'); Logic.add(va.id, pp[1].id, 'air'); Logic.add(tk.id, ga.id, 'air'); b.e('box', { x: 0.4, y: 0.4, z: 0.4 }, 'wood', 0.8, 1.5, 0, { part: 'box' }); toast('Press V to open the valve'); return [...b.ents, ...pp]; } });
 part('fountain', { name: 'Pump Fountain (lake)', cat: 'Fluids & Air', icon: '⛲', cost: 60, size: [2, 2, 1], desc: 'Place at the lake: pump → valve → nozzle', spawn(at, q) { const b = new Bld(at, q); const pu = b.e('box', { x: 0.5, y: 0.4, z: 0.4 }, 'metal', 0, 0.2, 0, { color: 0x2070d0, frozen: true, part: 'pump', beh: { pump: { rate: 60, on: true, speed: 7 } } }); const va = b.e('box', { x: 0.25, y: 0.25, z: 0.25 }, 'metal', 0.6, 0.6, 0, { color: 0xc03030, frozen: true, part: 'valve', beh: { valve: { open: true, key: 'KeyV' } } }); const no = b.e('box', { x: 0.2, y: 0.2, z: 0.3 }, 'metal', 1.0, 1.4, 0, { q: QX(-70), color: 0x90a0b0, frozen: true, part: 'faucet', beh: { faucet: { rate: 0, on: false, speed: 7 } } }); Logic.add(pu.id, va.id, 'pipe'); Logic.add(va.id, no.id, 'pipe'); return b.ents; } });
 // ---------- Aero & Soft ----------
 part('wing', { name: 'Wing', cat: 'Aero & Soft', icon: '🪽', cost: 20, ent: { kind: 'box', params: { x: 2, y: 0.05, z: 0.6 }, mat: 'wood', mass: 6, color: 0xe8e8f0, beh: { wing: { area: 1.2, cl: 1.2, cd0: 0.03 } } }, desc: 'Lift ⟂ airflow (chord along −Z = forward)' });
@@ -2477,6 +2526,8 @@ part('tree', { name: 'Tree Log Pile', cat: 'Nature', icon: '🌲', cost: 5, size
 part('rock', { name: 'Rock', cat: 'Nature', icon: '🪨', cost: 2, make: () => ({ kind: 'hull', params: { pts: Fracture.randomRock(srange(0.3, 0.7)) }, mat: 'stone', color: 0x8a8580 }) });
 // ---------- Vehicles ----------
 part('car', { name: 'Car', cat: 'Vehicles', icon: '🚗', cost: 200, size: [2.8, 1.2, 1.8], desc: '↑↓ drive, ←→ steer, Shift+B brake. Gamepad supported.', spawn(at, q) { return Vehicles.car(new Bld(at, q)); } });
+part('buggy', { name: 'Buggy (suspension + differential)', cat: 'Vehicles', icon: '🏎️', cost: 280, size: [3, 1.4, 2], desc: 'Shock-absorber suspension on every wheel; rear wheels driven through an open differential. ↑↓ ←→', spawn(at, q) { return Vehicles.buggy(new Bld(at, q)); } });
+part('sailboat', { name: 'Sailboat (cloth sail)', cat: 'Vehicles', icon: '⛵', cost: 180, size: [3, 4, 1.4], desc: 'Cloth sail on a mast: wind on the cloth pushes the hull. Place on the lake.', spawn(at, q) { return Vehicles.sailboat(new Bld(at, q)); } });
 part('tank', { name: 'Tank (treads)', cat: 'Vehicles', icon: '🛡️', cost: 300, size: [3, 1.3, 2.2], desc: 'Belt-coupled road wheels per side; ↑↓ drive, ←→ skid-steer', spawn(at, q) { return Vehicles.tank(new Bld(at, q)); } });
 part('boat', { name: 'Boat', cat: 'Vehicles', icon: '🚤', cost: 150, size: [3, 1, 1.4], desc: 'Place on the lake. T = throttle, ←→ rudder', spawn(at, q) { return Vehicles.boat(new Bld(at, q)); } });
 part('sub', { name: 'Submarine', cat: 'Vehicles', icon: '🐟', cost: 250, size: [3, 1, 1], desc: 'Ballast: Q flood (dive), E blow (surface), T throttle', spawn(at, q) { return Vehicles.sub(new Bld(at, q)); } });
@@ -2484,7 +2535,7 @@ part('hotair', { name: 'Hot Air Balloon', cat: 'Vehicles', icon: '🎈', cost: 1
 part('heli', { name: 'Helicopter', cat: 'Vehicles', icon: '🚁', cost: 300, size: [4, 2, 4], desc: 'T throttle; I/K pitch, J/L roll, U/O yaw', spawn(at, q) { return Vehicles.heli(new Bld(at, q)); } });
 part('plane', { name: 'Plane', cat: 'Vehicles', icon: '✈️', cost: 300, size: [4, 1.6, 6], desc: 'T throttle; I/K pitch, J/L roll. Take off from a road!', spawn(at, q) { return Vehicles.plane(new Bld(at, q)); } });
 part('glider', { name: 'Glider', cat: 'Vehicles', icon: '🛩️', cost: 120, size: [3, 1, 5], desc: 'Launch it from the cliff or hill top', spawn(at, q) { return Vehicles.glider(new Bld(at, q)); } });
-part('minecart', { name: 'Minecart', cat: 'Vehicles', icon: '🛒', cost: 40, ent: { kind: 'compound', params: { parts: [{ t: 'box', d: [1.2, 0.1, 1.1] }, { t: 'box', d: [1.2, 0.5, 0.06], p: [0, 0.28, 0.52] }, { t: 'box', d: [1.2, 0.5, 0.06], p: [0, 0.28, -0.52] }, { t: 'box', d: [0.06, 0.5, 1.1], p: [0.6, 0.28, 0] }, { t: 'box', d: [0.06, 0.5, 1.1], p: [-0.6, 0.28, 0] }, { t: 'cyl', d: [0.12, 0.08], p: [0.4, -0.08, 0.5], q: arr4(QX(90)), c: 0x202020 }, { t: 'cyl', d: [0.12, 0.08], p: [-0.4, -0.08, 0.5], q: arr4(QX(90)), c: 0x202020 }, { t: 'cyl', d: [0.12, 0.08], p: [0.4, -0.08, -0.5], q: arr4(QX(90)), c: 0x202020 }, { t: 'cyl', d: [0.12, 0.08], p: [-0.4, -0.08, -0.5], q: arr4(QX(90)), c: 0x202020 }] }, mat: 'metal', mass: 120, color: 0x705030 }, desc: 'Ride the rail channel east of the build zone' });
+part('minecart', { name: 'Minecart', cat: 'Vehicles', icon: '🛒', cost: 40, ent: { kind: 'compound', params: { parts: [{ t: 'box', d: [1.2, 0.1, 1.1] }, { t: 'box', d: [1.2, 0.5, 0.06], p: [0, 0.28, 0.52] }, { t: 'box', d: [1.2, 0.5, 0.06], p: [0, 0.28, -0.52] }, { t: 'box', d: [0.06, 0.5, 1.1], p: [0.6, 0.28, 0] }, { t: 'box', d: [0.06, 0.5, 1.1], p: [-0.6, 0.28, 0] }, { t: 'cyl', d: [0.12, 0.08], p: [0.4, -0.08, 0.5], q: arr4(QX(90)), c: 0x202020 }, { t: 'cyl', d: [0.12, 0.08], p: [-0.4, -0.08, 0.5], q: arr4(QX(90)), c: 0x202020 }, { t: 'cyl', d: [0.12, 0.08], p: [0.4, -0.08, -0.5], q: arr4(QX(90)), c: 0x202020 }, { t: 'cyl', d: [0.12, 0.08], p: [-0.4, -0.08, -0.5], q: arr4(QX(90)), c: 0x202020 }] }, mat: 'metal', mass: 120, color: 0x705030, fricMul: 0.05 }, desc: 'Ride the rail channel east of the build zone' });
 // ---------- Templates (larger machines) ----------
 part('catapult', { name: 'Catapult', cat: 'Templates', icon: '🏰', cost: 150, size: [3.4, 2, 1.6], desc: 'Space releases the arm (servo)', spawn(at, q) { return Machines.catapult(new Bld(at, q)); } });
 part('trebuchet', { name: 'Trebuchet', cat: 'Templates', icon: '🏯', cost: 250, size: [6, 5, 2], desc: 'Space pulls the pin; the sling releases automatically', spawn(at, q) { return Machines.trebuchet(new Bld(at, q)); } });
@@ -2561,27 +2612,51 @@ const Vehicles = {
   car(b) {
     const ch = b.e('compound', { parts: [{ t: 'box', d: [2.6, 0.25, 1.3] }, { t: 'box', d: [1.3, 0.5, 1.2], p: [-0.25, 0.37, 0], c: 0x9fc4e0 }, { t: 'box', d: [0.5, 0.2, 1.2], p: [1.1, 0.2, 0], c: 0x202020 }] }, 'metal', 0, 0.62, 0, { mass: 350, color: 0xd03030, part: 'carbody', respawn: arr3(b.P(0, 1.5, 0)), label: 'Car' });
     const R = 0.36, W = 0.26, wy = 0.36, wx = 1.0, wz = 0.84;
-    for (const z of [-wz, wz]) { const w = b.e('wheel', { r: R, w: W }, 'rubber', -wx, wy, z, { q: QY(90), mass: 18, part: 'tire', color: 0x1a1a1a }); w.cols.forEach(c => c.setFriction(1.3)); b.j('motor', w, ch, -wx, wy, z, [0, 0, 1], { rpm: 450, torque: 500, keyF: 'ArrowUp', keyB: 'ArrowDown', brake: false, brakeKey: 'KeyB' }); }
-    for (const z of [-wz, wz]) { const kn = b.box(0.08, 0.16, 0.08, 'metal', wx, wy, z, { mass: 10, part: 'knuckle' }); b.j('steer', kn, ch, wx, wy, z, [0, -1, 0], { max: 32, torque: 3000 }); const w = b.e('wheel', { r: R, w: W }, 'rubber', wx, wy, z, { q: QY(90), mass: 18, part: 'tire', color: 0x1a1a1a }); w.cols.forEach(c => c.setFriction(1.3)); b.j('hinge', w, kn, wx, wy, z, [0, 0, 1]); }
+    for (const z of [-wz, wz]) { const w = b.e('wheel', { r: R, w: W }, 'rubber', -wx, wy, z, { q: QY(90), mass: 18, part: 'tire', color: 0x1a1a1a, fricMul: 1.4 }); b.j('motor', w, ch, -wx, wy, z, [0, 0, 1], { rpm: 450, torque: 500, keyF: 'ArrowUp', keyB: 'ArrowDown', brake: false, brakeKey: 'KeyB' }); }
+    for (const z of [-wz, wz]) { const kn = b.box(0.08, 0.16, 0.08, 'metal', wx, wy, z, { mass: 10, part: 'knuckle' }); b.j('steer', kn, ch, wx, wy, z, [0, -1, 0], { max: 32, torque: 3000 }); const w = b.e('wheel', { r: R, w: W }, 'rubber', wx, wy, z, { q: QY(90), mass: 18, part: 'tire', color: 0x1a1a1a, fricMul: 1.4 }); b.j('hinge', w, kn, wx, wy, z, [0, 0, 1]); }
     return b.ents;
+  },
+  // Buggy: every wheel on a shock-absorber slider; rear wheels share an open differential driven by a motor
+  buggy(b) {
+    const ch = b.e('compound', { parts: [{ t: 'box', d: [2.6, 0.2, 1.1] }, { t: 'box', d: [0.9, 0.5, 0.9], p: [-0.2, 0.35, 0], c: 0x303840 }, { t: 'box', d: [0.1, 0.6, 1.2], p: [-0.6, 0.6, 0], c: 0x202020 }] }, 'metal', 0, 0.95, 0, { mass: 380, color: 0x30a0d0, part: 'buggybody', label: 'Buggy', respawn: arr3(b.P(0, 1.8, 0)) });
+    const hub = (x, z) => { const hz = Math.sign(z) * 0.6; const h = b.box(0.1, 0.12, 0.1, 'metal', x, 0.45, hz, { mass: 12, part: 'hub' }); b.j('shock', h, ch, x, 0.45, hz, [0, 1, 0], { lo: -0.18, hi: 0.18, stiffness: 26000, damping: 2600 }); return h; };
+    const wheel = (x, z) => { const w = b.e('wheel', { r: 0.4, w: 0.3 }, 'rubber', x, 0.45, z, { q: QY(90), mass: 18, part: 'tire', color: 0x1a1a1a, fricMul: 1.5 }); return w; };
+    const rear = [];
+    for (const z of [-0.85, 0.85]) { const h = hub(-1.05, z); const w = wheel(-1.05, z); b.j('hinge', w, h, -1.05, 0.45, z, [0, 0, 1]); rear.push(w); }
+    for (const z of [-0.85, 0.85]) { const h = hub(1.05, z); const kn = b.e('compound', { parts: [{ t: 'box', d: [0.08, 0.14, 0.08] }, { t: 'box', d: [0.06, 0.06, 0.25], p: [0, 0, -Math.sign(z) * 0.14] }] }, 'metal', 1.05, 0.45, z, { mass: 8, part: 'knuckle' }); b.j('steer', kn, h, 1.05, 0.45, z, [0, -1, 0], { max: 30, torque: 2500 }); const w = wheel(1.05, z); b.j('hinge', w, kn, 1.05, 0.45, z, [0, 0, 1]); }
+    const carrier = b.e('wheel', { r: 0.22, w: 0.18 }, 'metal', -1.05, 0.8, 0, { q: QY(90), mass: 40, part: 'differential', color: 0xd0a040, label: 'diff' });
+    b.j('motor', carrier, ch, -1.05, 0.8, 0, [0, 0, 1], { rpm: 420, torque: 1000, keyF: 'ArrowUp', keyB: 'ArrowDown', brake: false, brakeKey: 'KeyB' });
+    Gears.create({ type: 'diff', terms: [{ e: rear[0], ax: [1, 0, 0], c: 1 }, { e: rear[1], ax: [1, 0, 0], c: 1 }, { e: carrier, ax: [1, 0, 0], c: -2 }], ratio: 1 });
+    toast('Buggy: ↑↓ drive (open differential), ←→ steer, B brake'); return b.ents;
+  },
+  sailboat(b) {
+    const ents = this.boat(b); const hull = ents[0];
+    ents.filter(e => e.part === 'propeller').forEach(e => Entities.remove(e)); hull.label = 'Sailboat';
+    const mast = b.e('cylinder', { r: 0.05, h: 3.2 }, 'wood', 0.3, 1.9, 0, { mass: 8, part: 'mast' }); b.j('weld', mast, hull, 0.3, 0.35, 0);
+    const boom = b.e('cylinder', { r: 0.04, h: 2.2 }, 'wood', 0.38, 0.75, 0, { q: QX(90), mass: 3, part: 'boom' }); b.j('weld', boom, mast, 0.35, 0.75, 0);
+    const n = 10, sp = 2.4 / (n - 1), pins = []; for (let j = 0; j < n; j++) pins.push({ i: j * n, e: mast.id }); for (let i = 1; i < n; i++) pins.push({ i: (n - 1) * n + i, e: boom.id });
+    const pins2 = []; for (let j = 0; j < n; j++) pins2.push({ i: j * n + Math.floor(n / 2), e: mast.id }); for (let i = 0; i < n; i++) pins2.push({ i: (n - 1) * n + i, e: boom.id });
+    Cloth.create({ type: 'sail', w: n, h: n, sp: 2.1 / (n - 1), origin: arr3(b.P(0.4, 3.2, -1.05)), right: arr3(b.A(0, 0, 1)), down: arr3(b.A(0, -1, 0)), pins: pins2, color: 0xf4f0e4, nodeMass: 0.04 });
+    if (Weather.windSpeed < 5) { Weather.windSpeed = 8; Weather.windDir = 0; toast('🌬️ Wind set to 8 m/s from the west — sail runs downwind (+X)'); }
+    return b.ents.filter(e => !e.removed);
   },
   tank(b) {
     const ch = b.e('compound', { parts: [{ t: 'box', d: [3, 0.5, 1.5] }, { t: 'box', d: [1.4, 0.45, 1.2], p: [-0.2, 0.47, 0], c: 0x556644 }, { t: 'cyl', d: [0.08, 1.8], p: [1.2, 0.5, 0], q: arr4(QZ(90)), c: 0x333833 }, { t: 'box', d: [3.2, 0.08, 0.45], p: [0, 0.3, 0.95], c: 0x2a2a2a }, { t: 'box', d: [3.2, 0.08, 0.45], p: [0, 0.3, -0.95], c: 0x2a2a2a }] }, 'metal', 0, 0.75, 0, { mass: 2500, color: 0x667755, part: 'tankbody', respawn: arr3(b.P(0, 1.5, 0)), label: 'Tank' });
     for (const [z, turn] of [[-0.95, 1], [0.95, -1]]) {
-      const ws = []; for (let i = 0; i < 5; i++) { const x = -1.2 + i * 0.6; const w = b.e('wheel', { r: 0.3, w: 0.35 }, 'rubber', x, 0.32, z, { q: QY(90), mass: 40, part: 'tire', color: 0x1a1a1a }); w.cols.forEach(c => c.setFriction(1.4)); b.j(i === 0 ? 'motor' : 'hinge', w, ch, x, 0.32, z, [0, 0, 1], i === 0 ? { rpm: 160, torque: 4000, keyF: 'ArrowUp', keyB: 'ArrowDown', turn, brake: true } : undefined); ws.push(w); }
+      const ws = []; for (let i = 0; i < 5; i++) { const x = -1.2 + i * 0.6; const w = b.e('wheel', { r: 0.3, w: 0.35 }, 'rubber', x, 0.32, z, { q: QY(90), mass: 40, part: 'tire', color: 0x1a1a1a, fricMul: 1.5 }); b.j(i === 0 ? 'motor' : 'hinge', w, ch, x, 0.32, z, [0, 0, 1], i === 0 ? { rpm: 160, torque: 4000, keyF: 'ArrowUp', keyB: 'ArrowDown', turn, brake: true } : undefined); ws.push(w); }
       for (let i = 1; i < 5; i++) Gears.link(ws[0], ws[i], 'belt').tread = true;
     }
     return b.ents;
   },
   boat(b) {
     const hull = b.e('compound', { parts: [{ t: 'box', d: [3, 0.12, 1.3] }, { t: 'box', d: [3, 0.6, 0.08], p: [0, 0.3, 0.62] }, { t: 'box', d: [3, 0.6, 0.08], p: [0, 0.3, -0.62] }, { t: 'box', d: [0.08, 0.6, 1.3], p: [-1.5, 0.3, 0] }, { t: 'wedge', d: [0.6, 0.6, 1.3] }, { t: 'box', d: [0.5, 0.6, 1.3], p: [1.7, 0.3, 0], q: arr4(QZ(-20)) }] .filter(p => p.t !== 'wedge') }, 'wood', 0, 0.2, 0, { mass: 220, color: 0xf0f0f0, part: 'hull', extra: { displace: 2.2 }, label: 'Boat' });
-    const prop = b.e('propeller', { r: 0.25, blades: 3 }, 'metal', -1.7, -0.1, 0, { q: QZ(90), mass: 4, part: 'propeller', beh: { propeller: { thrust: 260, rpm: 1500, key: 'KeyT', keyB: 'KeyG' } } }); prop.mesh.name = 'spin'; b.j('weld', prop, hull, -1.6, -0.1, 0);
+    const prop = b.e('propeller', { r: 0.25, blades: 3 }, 'metal', -1.7, -0.1, 0, { q: QZ(-90), mass: 4, part: 'propeller', beh: { propeller: { thrust: 700, rpm: 1500, key: 'KeyT', keyB: 'KeyG' } } }); prop.mesh.name = 'spin'; b.j('weld', prop, hull, -1.6, -0.1, 0);
     const rud = b.box(0.4, 0.5, 0.04, 'wood', -1.75, -0.15, 0, { mass: 3, part: 'rudder' }); b.j('steer', rud, hull, -1.55, -0.15, 0, [0, -1, 0], { max: 35, torque: 400 });
     return b.ents;
   },
   sub(b) {
-    const hull = b.e('compound', { parts: [{ t: 'capsule', d: [0.5, 2] , q: arr4(QZ(90)) }, { t: 'box', d: [0.6, 0.5, 0.3], p: [0.3, 0.65, 0], c: 0x223344 }, { t: 'box', d: [0.05, 0.4, 0.8], p: [-1.4, 0, 0], c: 0x223344 }] }, 'metal', 0, 0.55, 0, { mass: 1700, color: 0xe0c020, part: 'subhull', label: 'Submarine', extra: { displace: 2.05 }, beh: { ballast: { cap: 700, fill: 0.4, keyFill: 'PageDown', keyEmpty: 'PageUp' }, pilot: { torque: 800, stab: 6 } } });
-    const prop = b.e('propeller', { r: 0.3, blades: 4 }, 'metal', -1.6, 0.55, 0, { q: QZ(90), mass: 5, part: 'propeller', beh: { propeller: { thrust: 600, rpm: 900, key: 'KeyT', keyB: 'KeyG' } } }); prop.mesh.name = 'spin'; b.j('weld', prop, hull, -1.55, 0.55, 0);
+    const hull = b.e('compound', { parts: [{ t: 'capsule', d: [0.5, 2] , q: arr4(QZ(90)) }, { t: 'box', d: [0.6, 0.5, 0.3], p: [0.3, 0.65, 0], c: 0x223344 }, { t: 'box', d: [0.05, 0.4, 0.8], p: [-1.4, 0, 0], c: 0x223344 }] }, 'metal', 0, 0.55, 0, { mass: 1700, color: 0xe0c020, part: 'subhull', label: 'Submarine', extra: { displace: 2.05 }, beh: { ballast: { cap: 1000, fill: 0, keyFill: 'PageDown', keyEmpty: 'PageUp' }, pilot: { torque: 800, stab: 6 } } });
+    const prop = b.e('propeller', { r: 0.3, blades: 4 }, 'metal', -1.6, 0.55, 0, { q: QZ(-90), mass: 5, part: 'propeller', beh: { propeller: { thrust: 600, rpm: 900, key: 'KeyT', keyB: 'KeyG' } } }); prop.mesh.name = 'spin'; b.j('weld', prop, hull, -1.55, 0.55, 0);
     toast('Submarine: PageDown flood ballast, PageUp blow, T/G thrust, J/L roll, U/O yaw'); return b.ents;
   },
   balloon(b) {
@@ -2677,7 +2752,7 @@ const Machines = {
   },
   piledriver(b) {
     const fr = b.e('compound', { parts: [{ t: 'box', d: [0.2, 6, 0.2], p: [-0.6, 3, 0] }, { t: 'box', d: [0.2, 6, 0.2], p: [0.6, 3, 0] }, { t: 'box', d: [1.4, 0.2, 0.4], p: [0, 6.1, 0] }, { t: 'box', d: [1.8, 0.2, 1.4], p: [0, 0.1, 0] }] }, 'metal', 0, 0, 0, { frozen: true, part: 'frame', color: 0xe0b020 });
-    const pile = b.e('cylinder', { r: 0.15, h: 2.5 }, 'wood', 0, 1.45, 0, { mass: 60, part: 'pile', color: 0x7a5535 }); b.j('shock', pile, fr, 0, 1.45, 0, [0, 1, 0], { lo: -1.2, hi: 0.01, stiffness: 0, damping: 60000 });
+    const pile = b.e('cylinder', { r: 0.15, h: 2.5 }, 'wood', 0, 1.45, 0, { mass: 60, part: 'pile', color: 0x7a5535 }); b.j('shock', pile, fr, 0, 1.45, 0, [0, 1, 0], { lo: -1.2, hi: 0.01, stiffness: 0, damping: 0, fric: 30000 });
     const ham = b.box(0.6, 0.6, 0.6, 'metal', 0, 4.6, 0, { mass: 700, part: 'hammer', color: 0x404448, beh: { release: { key: 'KeyH', drop: 3 } } }); b.j('slider', ham, fr, 0, 4.6, 0, [0, 1, 0], { lo: -2.0, hi: 1.0 });
     const top = b.e('pulley', { r: 0.2, w: 0.1 }, 'metal', 0, 6.45, 0, { frozen: true, q: QY(90), part: 'pulley' });
     const w = b.e('box', { x: 0.5, y: 0.4, z: 0.5 }, 'metal', 1.3, 0.2, 0, { frozen: true, part: 'ewinch', color: 0xd04030, beh: { winch: { speed: 1.2, maxF: 30000, keyIn: 'KeyI', keyOut: 'KeyK' }, release: { key: 'KeyH', drop: 4 } } });
@@ -2738,6 +2813,7 @@ Arena.populate = function () {
   PARTS.lever.spawn(V3(-5.5, 0, -2), q);
   Entities.create({ kind: 'box', params: { x: 0.4, y: 0.4, z: 0.4 }, mat: 'metal', mass: 40, pos: [-3.7, 2.5, -2], part: 'w50', color: weightColor(40) });
   Ragdoll.build(V3(-1.5, 0.02, -3.5), { dummy: true, label: 'Dummy' });
+  const rp = Terrain.railPts[1]; Entities.create({ ...PARTS.minecart.ent, pos: [rp.x, rp.y + 0.35, rp.z], rot: arr4(QY(0)), part: 'minecart', label: 'Minecart', respawn: [rp.x, rp.y + 0.6, rp.z] });
 };
 // ======================================================================
 // build.js
@@ -2844,7 +2920,7 @@ const Build = {
   setMouse(x, y) { this.mouse.set(x / innerWidth * 2 - 1, -(y / innerHeight) * 2 + 1); this.ray.setFromCamera(this.mouse, App.camera); },
   cast(exclude) {
     const o = this.ray.ray.origin, d = this.ray.ray.direction; const ray = new R.Ray(rv(o), rv(d));
-    const hit = World.world.castRayAndGetNormal(ray, 1500, true, undefined, 0xFFFFFFEB, undefined, undefined, c => { const e = Entities.byCol.get(c.handle); return !exclude || !e || !exclude.has(e); });
+    const hit = World.world.castRayAndGetNormal(ray, 1500, true, undefined, 0xFFFFFFEB, undefined, undefined, c => { if (Arena.noPick.has(c.handle)) return false; const e = Entities.byCol.get(c.handle); return !exclude || !e || !exclude.has(e); });
     if (!hit) { const t = (0 - o.y) / d.y; return t > 0 && t < 1500 ? { point: o.clone().addScaledVector(d, t), normal: V3(0, 1, 0), ent: null, terrain: true } : null; }
     const p = o.clone().addScaledVector(d, hit.timeOfImpact); const n = V3(hit.normal.x, hit.normal.y, hit.normal.z);
     const ent = Entities.byCol.get(hit.collider.handle) || null;
@@ -3214,7 +3290,7 @@ const JRender = {
       } else if (k === 'spring') {
         const ax = pb.clone().sub(pa), L = ax.length(); if (L < 1e-3) continue; const u = ax.clone().divideScalar(L); const p1 = Math.abs(u.y) < 0.9 ? V3(0, 1, 0).cross(u).normalize() : V3(1, 0, 0).cross(u).normalize(); const p2 = u.clone().cross(p1);
         let prev = pa.clone(); const turns = 10, n = 60, r = 0.08; for (let i = 1; i <= n; i++) { const t = i / n, a = t * turns * Math.PI * 2; const p = pa.clone().addScaledVector(u, L * t).addScaledVector(p1, Math.cos(a) * r * (t > 0.05 && t < 0.95 ? 1 : 0)).addScaledVector(p2, Math.sin(a) * r * (t > 0.05 && t < 0.95 ? 1 : 0)); line(prev, p, 0xffd34d); prev = p; }
-      } else if (k === 'slider') { const ax = Joints.axisWorld(j, V3()); line(pa.clone().addScaledVector(ax, -(j.params.hi ?? 1)), pa.clone().addScaledVector(ax, -(j.params.lo ?? -1)), 0x3fd0c0); anchor(pa, showStress ? this.stressCol(j.stress, new THREE.Color()) : new THREE.Color(j.def.col), 1); }
+      } else if (k === 'slider') { const ax = Joints.axisWorld(j, V3()); line(pb.clone().addScaledVector(ax, j.params.lo ?? -1), pb.clone().addScaledVector(ax, j.params.hi ?? 1), 0x3fd0c0); anchor(pa, showStress ? this.stressCol(j.stress, new THREE.Color()) : new THREE.Color(j.def.col), 1); }
       else { if (j.a.part === 'jellynode') continue; const c = showStress ? this.stressCol(j.stress, new THREE.Color()) : (j.mot.stall ? new THREE.Color(0xff0000) : new THREE.Color(j.def.col)); anchor(pa, c, k === 'hinge' ? 1.3 : 1); if (k === 'hinge' && (j.params.mode || Debug.joints)) { const ax = Joints.axisWorld(j, V3()); line(pa.clone().addScaledVector(ax, -0.25), pa.clone().addScaledVector(ax, 0.25), j.def.col); } }
     }
     for (const r of Ropes.list) {
@@ -3348,7 +3424,7 @@ const Replay = {
     this.ghostMeshes.forEach(m => App.scene.remove(m)); this.ghostMeshes.clear(); if (!this.ghost) return;
     const gm = new THREE.MeshBasicMaterial({ color: 0x80c0ff, transparent: true, opacity: 0.3, depthWrite: false });
     const ids = new Set(); this.ghost.frames.forEach(f => f.ids.forEach(id => ids.add(id)));
-    for (const id of ids) { const e = Entities.map.get(id); if (!e) continue; const m = e.mesh.clone(true); m.traverse(o => { if (o.isMesh) o.material = gm; o.castShadow = false; }); m.children.filter(c => c.isLight || c.name === '_wire').forEach(c => m.remove(c)); m.visible = false; App.scene.add(m); this.ghostMeshes.set(id, m); }
+    for (const id of ids) { const e = Entities.map.get(id); if (!e) continue; const saved = []; e.mesh.traverse(o => { saved.push([o, o.userData]); o.userData = {}; }); const m = e.mesh.clone(true); saved.forEach(([o, u]) => o.userData = u); m.traverse(o => { if (o.isMesh) o.material = gm; o.castShadow = false; }); m.children.filter(c => c.isLight || c.name === '_wire').forEach(c => m.remove(c)); m.visible = false; App.scene.add(m); this.ghostMeshes.set(id, m); }
   },
   updateGhost() {
     if (!this.ghost) return; const t = this.ghost.t0 + (World.time - this.ghostT0); const fr = this.ghost.frames; let i = fr.findIndex(f => f.t >= t); if (i < 0) i = fr.length - 1; const f = fr[i];
@@ -3527,7 +3603,7 @@ const UI = {
     const P = { gravity: World.gravity.y, friction: 1, restitution: 1, timeScale: 1, substeps: 1, iterations: World.iterations, linDamp: World.linDamp, angDamp: World.angDamp, sleeping: true, gyro: true, airDrag: true, noBreak: false };
     const f1 = g.addFolder('Physics');
     f1.add(P, 'gravity', -30, 10, 0.01).name('Gravity Y (m/s²)').onChange(v => World.setGravity(v)).listen?.();
-    f1.add(P, 'friction', 0, 3, 0.01).name('Friction ×').onChange(v => { World.frictionMul = v; Entities.all.forEach(e => e.cols.forEach(c => c.setFriction(e.matDef.friction * v))); });
+    f1.add(P, 'friction', 0, 3, 0.01).name('Friction ×').onChange(v => { World.frictionMul = v; Entities.all.forEach(e => e.cols.forEach(c => c.setFriction(e.matDef.friction * v * e.fricMul))); });
     f1.add(P, 'restitution', 0, 2, 0.01).name('Restitution ×').onChange(v => { World.restMul = v; Entities.all.forEach(e => e.cols.forEach(c => c.setRestitution(clamp(e.matDef.rest * v, 0, 1.2)))); });
     f1.add(P, 'timeScale', 0.05, 2, 0.05).name('Time scale').onChange(v => { World.timeScale = v; this.slow.value = v; this.slowLbl.textContent = v.toFixed(2) + '×'; });
     f1.add(P, 'substeps', [1, 2, 4, 8]).name('Substeps').onChange(v => { World.substeps = +v; World.applySolver(); });
@@ -3613,7 +3689,7 @@ const UI = {
     const iv = setInterval(() => { t += 0.25; el.querySelector('.tprog').style.width = (t / 12 * 100) + '%'; if (t >= 12) { i++; show(); } }, 250); show();
   },
   // --- right properties / inspector panel ---
-  showPanel(e) { this.panelEnt = e; const p = $('#panel'); if (!p) return; if (!e) { p.style.display = 'none'; return; } p.style.display = 'block'; this.renderPanel(); },
+  showPanel(e) { this.panelEnt = e; const p = $('#panel'); if (!p) return; if (this.gui) this.gui.domElement.style.right = e && innerWidth > 720 ? '306px' : '8px'; if (!e) { p.style.display = 'none'; return; } p.style.display = 'block'; this.renderPanel(); },
   renderPanel() {
     const e = this.panelEnt, p = $('#panel'); if (!e || e.removed) { this.showPanel(null); return; } p.innerHTML = ''; const P = PARTS[e.part];
     const row = (label, ...kids) => h('div', { class: 'row' }, h('label', {}, label), ...kids);
@@ -3730,14 +3806,13 @@ App.render = function () {
 // Housekeeping systems
 const Housekeeping = {
   farSleep() { const c = App.camera.position; for (const e of Entities.awake) { if (!e.dyn || Build.grabbed?.e === e) continue; if (e.p1.distanceTo(c) > 160) { const v = e.body.linvel(); if (Math.abs(v.x) + Math.abs(v.y) + Math.abs(v.z) < 1.5) e.body.sleep(); } } },
-  autoCcd() { for (const e of Entities.awake) { if (!e.dyn) continue; const v = e.body.linvel(); const s = Math.hypot(v.x, v.y, v.z); const minH = Math.min(e.half.x, e.half.y, e.half.z); if (!e.ccd && s * World.dt > minH * 0.5) { e.body.enableCcd(true); e.ccd = 'auto'; } else if (e.ccd === 'auto' && s * World.dt < minH * 0.2) { e.body.enableCcd(false); e.ccd = false; } } },
+  autoCcd() { for (const e of Entities.awake) { if (!e.dyn) continue; const v = e.body.linvel(); const s = Math.hypot(v.x, v.y, v.z); const minH = Math.min(e.half.x, e.half.y, e.half.z); if (s > 15) e.body.setSoftCcdPrediction(s * World.dt * 1.5); if (!e.ccd && s * World.dt > minH * 0.5) { e.body.enableCcd(true); e.ccd = 'auto'; } else if (e.ccd === 'auto' && s * World.dt < minH * 0.2) { e.body.enableCcd(false); e.ccd = false; } } },
 };
 function wireSystems() {
   World.addPre('arena', dt => Arena.step(dt), 1);
   World.addPre('disasters', dt => Disasters.step(dt), 2);
   World.addPre('logic', dt => Logic.pre(dt), 5);
-  World.addPre('motors', dt => Motors.pre(dt), 20);
-  World.addPre('gears', dt => Gears.pre(dt), 25);
+  World.addPre('drivetrain', dt => { for (let it = 0; it < Motors.iters; it++) { Motors.pre(dt, it); Gears.pre(dt, it); } }, 20);
   World.addPre('ropes', dt => Ropes.pre(dt), 30);
   World.addPre('buoyancy', dt => Fluids.buoyancy(dt), 40);
   World.addPre('aero', dt => Aero.pre(dt), 41);
@@ -3785,7 +3860,7 @@ async function main() {
     setLoad(70, 'Building the test arena…'); await nextFrame(); Arena.init(); JRender.init(); Debug.init(); Build.init(); Cam.init(); Input.init(); UI.build(); wireSystems();
     setLoad(85, 'Spawning test content…'); await nextFrame(); Arena.populate(); Magnets.refresh(); Modes.preTest = SaveLoad.snapshot(); UI.playChanged();
     setLoad(100, 'Ready'); await nextFrame(); $('#loading').remove(); UI.tutorial();
-    window.SANDBOX = { App, World, Entities, Joints, Ropes, Gears, Logic, PARTS, Build, Modes, SaveLoad, Fire, Fluids, Explosion, Disasters, Planets, Cam, UI, Replay, LoadTest, Terrain, Cloth, Jelly, Ragdoll, Stats, Input, BEH, Fracture, Weather, Arena, Graph };
+    window.SANDBOX = { Undo, App, World, Entities, Joints, Ropes, Gears, Logic, PARTS, Build, Modes, SaveLoad, Fire, Fluids, Explosion, Disasters, Planets, Cam, UI, Replay, LoadTest, Terrain, Cloth, Jelly, Ragdoll, Stats, Input, BEH, Fracture, Weather, Arena, Graph };
     requestAnimationFrame(t => { last = t; loop(t); });
   } catch (err) {
     console.error(err); const el = $('#loaderr'); if (el) { el.style.display = 'block'; el.textContent = '⚠️ Failed to start: ' + err.message + ' — check your internet connection (Three.js and Rapier load from a CDN) and use a WebGL2-capable browser.'; }
