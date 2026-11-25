@@ -579,6 +579,7 @@ const Terrain = {
     if (-z > 80) h = lerp(h, hz * 45, hw * smooth(80, 95, -z));
     const flat = smooth(95, 70, Math.max(Math.abs(x), Math.abs(z)));                              // flat build zone
     h = lerp(h, 0, flat);
+    h -= 0.3 * smooth(12, 10.5, Math.max(Math.abs(x), Math.abs(z)));                          // tuck terrain under the arena floor (no z-fighting)
     // roads flatten slightly toward their own smoothed level
     return h;
   },
@@ -3570,7 +3571,7 @@ const UI = {
     if (Input.isTouch) { tp.style.display = 'block'; $('#touchbtns').style.display = 'flex'; this.touchPad(tp); }
     this.buildItems(); this.toolChanged(); this.buildGui(); this.buildWindows(); this.layout(); addEventListener('resize', () => this.layout());
   },
-  layout() { const tb = $('#topbar').getBoundingClientRect(); const st = $('#stats'); st.style.top = (tb.bottom + 2) + 'px'; const sb = st.getBoundingClientRect(); const tl = $('#tools'); tl.style.top = (innerWidth > 720 ? sb.bottom + 6 : tb.bottom + 6) + 'px'; tl.style.maxHeight = (innerHeight - parseFloat(tl.style.top) - 170) + 'px'; $('#panel').style.top = (tb.bottom + 2) + 'px'; this.gui && (this.gui.domElement.style.top = (tb.bottom + 2) + 'px'); },
+  layout() { const tb = $('#topbar').getBoundingClientRect(); const st = $('#stats'); st.style.top = (tb.bottom + 2) + 'px'; const sb = st.getBoundingClientRect(); const tl = $('#tools'); tl.style.top = (innerWidth > 720 ? sb.bottom + 6 : tb.bottom + 6) + 'px'; tl.style.maxHeight = (innerHeight - parseFloat(tl.style.top) - 170) + 'px'; $('#panel').style.top = (tb.bottom + 2) + 'px'; $('#objective').style.top = (tb.bottom + 4) + 'px'; this.gui && (this.gui.domElement.style.top = (tb.bottom + 2) + 'px'); },
   touchPad(tp) { const knob = tp.firstChild; let id = null, c = null; tp.addEventListener('pointerdown', e => { id = e.pointerId; c = [e.clientX, e.clientY]; tp.setPointerCapture(id); e.stopPropagation(); }); tp.addEventListener('pointermove', e => { if (e.pointerId !== id) return; const dx = clamp((e.clientX - c[0]) / 40, -1, 1), dy = clamp((e.clientY - c[1]) / 40, -1, 1); knob.style.transform = `translate(${dx * 30}px,${dy * 30}px)`; Input.touchMove = V3(dx, 0, dy); }); const end = () => { id = null; knob.style.transform = ''; Input.touchMove = null; }; tp.addEventListener('pointerup', end); tp.addEventListener('pointercancel', end); },
   buildItems() {
     document.querySelectorAll('#cats button').forEach(b => b.classList.toggle('on', b.dataset.cat === this.cat));
@@ -3774,7 +3775,7 @@ const UI = {
   },
   labels() {
     const L = $('#labels'); if (!L || this.photo) return; const cam = App.camera; const items = [];
-    for (const e of Entities.all) { const r = e.beh.dummy ? e : null; if (!e.label && !r) continue; items.push({ p: e.mesh.position.clone().add(V3(0, e.half.y + (r ? 0.5 : 0.25), 0)), t: e.label, hp: r ? r.beh.dummy.hp : null }); if (items.length > 60) break; }
+    for (const e of Entities.all) { const r = e.beh.dummy ? e : null; if (!e.label && !r) continue; if (!Build.selected.has(e) && e.mesh.position.distanceToSquared(cam.position) > 4900) continue; items.push({ p: e.mesh.position.clone().add(V3(0, e.half.y + (r ? 0.5 : 0.25), 0)), t: e.label, hp: r ? r.beh.dummy.hp : null }); if (items.length > 60) break; }
     for (const m of Build.measures.concat(Build.measure.length ? [{ type: Build.tool, pts: Build.measure }] : [])) {
       if (m.type === 'ruler' && m.pts.length === 2) items.push({ p: m.pts[0].clone().lerp(m.pts[1], 0.5), t: '📏 ' + m.pts[0].distanceTo(m.pts[1]).toFixed(3) + ' m', meas: true });
       if (m.type === 'protractor' && m.pts.length === 3) { const a = m.pts[0].clone().sub(m.pts[1]), b = m.pts[2].clone().sub(m.pts[1]); items.push({ p: m.pts[1], t: '📐 ' + (a.angleTo(b) / DEG).toFixed(1) + '°', meas: true }); }
@@ -3860,7 +3861,7 @@ async function main() {
     setLoad(70, 'Building the test arena…'); await nextFrame(); Arena.init(); JRender.init(); Debug.init(); Build.init(); Cam.init(); Input.init(); UI.build(); wireSystems();
     setLoad(85, 'Spawning test content…'); await nextFrame(); Arena.populate(); Magnets.refresh(); Modes.preTest = SaveLoad.snapshot(); UI.playChanged();
     setLoad(100, 'Ready'); await nextFrame(); $('#loading').remove(); UI.tutorial();
-    window.SANDBOX = { Undo, App, World, Entities, Joints, Ropes, Gears, Logic, PARTS, Build, Modes, SaveLoad, Fire, Fluids, Explosion, Disasters, Planets, Cam, UI, Replay, LoadTest, Terrain, Cloth, Jelly, Ragdoll, Stats, Input, BEH, Fracture, Weather, Arena, Graph };
+    window.SANDBOX = { Debug, Motors, Undo, App, World, Entities, Joints, Ropes, Gears, Logic, PARTS, Build, Modes, SaveLoad, Fire, Fluids, Explosion, Disasters, Planets, Cam, UI, Replay, LoadTest, Terrain, Cloth, Jelly, Ragdoll, Stats, Input, BEH, Fracture, Weather, Arena, Graph };
     requestAnimationFrame(t => { last = t; loop(t); });
   } catch (err) {
     console.error(err); const el = $('#loaderr'); if (el) { el.style.display = 'block'; el.textContent = '⚠️ Failed to start: ' + err.message + ' — check your internet connection (Three.js and Rapier load from a CDN) and use a WebGL2-capable browser.'; }
