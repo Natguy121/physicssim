@@ -113,6 +113,41 @@ input[type=range]{accent-color:var(--acc)}
 .lil-gui.root{position:fixed!important;right:8px;top:60px;z-index:8;max-height:calc(100vh - 240px);overflow:auto}
 .lil-gui.root.side{top:auto;bottom:150px}
 textarea.code{width:100%;height:260px;font:12px ui-monospace,Menlo,monospace;white-space:pre;tab-size:2}
+/* Compact layout for phones (portrait or landscape): menus collapse, toolbars shrink */
+#menuBtn,#tbToggle,#toolsToggle{display:none}
+body.compact #menuBtn{display:inline-block}
+body.compact #topbar{padding:0;gap:4px}
+body.compact #topbar>.grp:not(:first-child){display:none}
+body.compact.menuOpen #topbar>.grp{display:flex}
+body.compact #topbar .grp{padding:3px}
+body.compact #topbar .grp>b{display:none}
+body.compact button,body.compact select{padding:3px 6px;font-size:11px}
+body.compact #stats{display:none}
+body.compact .lil-gui.root{display:none}
+body.compact.menuOpen .lil-gui.root{display:block}
+body.compact #tools{top:auto!important;bottom:8px;left:4px;max-height:calc(100vh - 70px)!important;padding:3px;gap:2px}
+body.compact #tools button{width:32px;height:28px;font-size:14px}
+body.compact #toolsToggle{display:block}
+body.compact.toolsHidden #tools>button:not(#toolsToggle),body.compact.toolsHidden #tools .tsep{display:none}
+body.compact #bottom{left:44px;right:4px;transform:none;width:auto;bottom:4px;padding:4px}
+body.compact #buildbar{display:none}
+body.compact #tbToggle{display:inline-block;position:absolute;right:4px;top:-30px}
+body.compact.tbHidden #bottom #cats,body.compact.tbHidden #bottom #items{display:none}
+body.compact.tbHidden #bottom{padding:0;background:none;border:0;box-shadow:none}
+body.compact #cats button{font-size:10px;padding:3px 6px}
+body.compact #items{min-height:0}
+body.compact .item{flex:0 0 58px;height:46px;font-size:9px}
+body.compact .item .ic{font-size:17px}
+body.compact .item .cost{display:none}
+body.compact #panel{width:min(260px,60vw);right:4px;max-height:55vh;font-size:11px}
+body.compact #tutorial{bottom:auto;top:48px;max-width:min(440px,70vw);padding:6px 8px;font-size:11px}
+body.compact #tutorial button{padding:2px 6px}
+body.compact #objective{max-width:70vw;font-size:11px;padding:5px 8px}
+body.compact #touchpad{left:auto;right:84px;bottom:12px;width:96px;height:96px}
+body.compact #touchpad i{left:28px;top:28px}
+body.compact #touchbtns{right:6px;bottom:12px;gap:4px}
+body.compact #touchbtns button{width:44px;height:36px}
+body.compact.tbOpen #touchpad,body.compact.tbOpen #touchbtns{display:none!important}
 @media (max-width:720px){#panel{width:calc(100vw - 16px);top:auto;bottom:150px;max-height:40vh}#tools{top:150px}#stats{display:none}.lil-gui.root{display:none}}
 </style>
 </head>
@@ -3531,7 +3566,7 @@ const UI = {
     const sel = (opts, fn, title, id) => { const s = h('select', { title, onchange: e => fn(e.target.value), id }, ...opts.map(o => Array.isArray(o) ? h('option', { value: o[0] }, o[1]) : h('option', { value: o }, o))); return s; };
     this.slow = h('input', { type: 'range', min: 0.05, max: 2, step: 0.05, value: 1, title: 'Slow motion / time scale', oninput: e => { World.timeScale = +e.target.value; this.slowLbl.textContent = (+e.target.value).toFixed(2) + '×'; } }); this.slowLbl = h('span', { style: { minWidth: '38px', display: 'inline-block' } }, '1.00×');
     hud.append(h('div', { id: 'topbar' },
-      h('div', { class: 'panel grp' }, h('b', {}, '⚙️ Sandbox'), sel([['sandbox', '🧪 Sandbox'], ['creative', '✨ Creative'], ['challenge', '🏆 Challenge']], v => v === 'challenge' ? this.challenges() : Modes.set(v), 'Game mode', 'modeSel'), btn('🏆', 'Challenges', () => this.challenges())),
+      h('div', { class: 'panel grp' }, h('button', { id: 'menuBtn', title: 'Menu', onclick: () => { document.body.classList.toggle('menuOpen'); this.layout(); } }, '☰'), h('b', {}, '⚙️ Sandbox'), sel([['sandbox', '🧪 Sandbox'], ['creative', '✨ Creative'], ['challenge', '🏆 Challenge']], v => v === 'challenge' ? this.challenges() : Modes.set(v), 'Game mode', 'modeSel'), btn('🏆', 'Challenges', () => this.challenges())),
       h('div', { class: 'panel grp' }, btn('⏸', 'Play / Pause (P)', () => Modes.togglePlay(), 'playBtn'), btn('⟲', 'Reset to pre-test state (R)', () => Modes.reset()), btn('⏭', 'Single step (.)', () => Modes.step()), '🐢', this.slow, this.slowLbl),
       h('div', { class: 'panel grp' }, sel([['orbit', '🎥 Orbit'], ['fly', '🕊️ Fly'], ['follow', '🎯 Follow'], ['walk', '🚶 Walk']], v => Cam.setMode(v), 'Camera (C)', 'camSel'), btn('🏟️ Test Arena', 'Teleport to the test arena', () => { if (Planets.active) Planets.exit(); Arena.go(); }), sel([['', '🌍 Go to…'], ...Object.keys(SPOTS).map(k => [k, k])], v => { if (!v) return; if (Planets.active) Planets.exit(); Cam.lookAt(V3(...SPOTS[v].cam), V3(...SPOTS[v].tgt)); $('#spotSel').value = ''; }, 'Teleport', 'spotSel')),
       h('div', { class: 'panel grp' }, sel([['', '🌪️ Disaster…'], ['quake', '🌋 Earthquake'], ['tornado', '🌪️ Tornado'], ['flood', '🌊 Flood'], ['meteors', '☄️ Meteor shower'], ['stop', '⛔ Stop all']], v => { if (v === 'stop') Disasters.stopAll(); else if (v) Disasters.start(v); $('#disSel').value = ''; }, 'Disasters', 'disSel'),
@@ -3542,7 +3577,7 @@ const UI = {
     ));
     hud.append(h('div', { id: 'stats', class: 'panel' }));
     // --- tool strip
-    const tools = h('div', { id: 'tools', class: 'panel' });
+    const tools = h('div', { id: 'tools', class: 'panel' }, h('button', { id: 'toolsToggle', title: 'Show/hide tools', onclick: () => document.body.classList.toggle('toolsHidden') }, '🧰'));
     for (const t of TOOLS) { if (!t) { tools.append(h('div', { class: 'tsep' })); continue; } tools.append(h('button', { 'data-tool': t[0], title: t[2], onclick: () => Build.setTool(t[0]) }, t[1])); }
     hud.append(tools);
     // --- properties panel
@@ -3563,7 +3598,7 @@ const UI = {
       h('span', { style: { flex: 1 } }), h('span', { id: 'toolHint' }, ''),
     );
     const cats = h('div', { id: 'cats' }, ...CATS.map(c => h('button', { 'data-cat': c, onclick: () => { this.cat = c; this.buildItems(); } }, c)));
-    hud.append(h('div', { id: 'bottom', class: 'panel' }, bb, cats, h('div', { id: 'items' })));
+    hud.append(h('div', { id: 'bottom', class: 'panel' }, h('button', { id: 'tbToggle', onclick: () => { document.body.classList.toggle('tbHidden'); document.body.classList.toggle('tbOpen', !document.body.classList.contains('tbHidden')); } }, '🧱 Parts'), bb, cats, h('div', { id: 'items' })));
     hud.append(h('div', { id: 'toast' }), h('div', { id: 'objective', class: 'panel' }));
     hud.append(h('div', { id: 'photobar', class: 'panel' }, h('button', { onclick: () => this.snapPhoto() }, '📸 Save PNG'), h('button', { onclick: () => this.togglePhoto() }, 'Exit photo mode')));
     // touch controls
@@ -3571,7 +3606,7 @@ const UI = {
     if (Input.isTouch) { tp.style.display = 'block'; $('#touchbtns').style.display = 'flex'; this.touchPad(tp); }
     this.buildItems(); this.toolChanged(); this.buildGui(); this.buildWindows(); this.layout(); addEventListener('resize', () => this.layout());
   },
-  layout() { const tb = $('#topbar').getBoundingClientRect(); const st = $('#stats'); st.style.top = (tb.bottom + 2) + 'px'; const sb = st.getBoundingClientRect(); const tl = $('#tools'); tl.style.top = (innerWidth > 720 ? sb.bottom + 6 : tb.bottom + 6) + 'px'; tl.style.maxHeight = (innerHeight - parseFloat(tl.style.top) - 170) + 'px'; $('#panel').style.top = (tb.bottom + 2) + 'px'; $('#objective').style.top = (tb.bottom + 4) + 'px'; this.gui && (this.gui.domElement.style.top = (tb.bottom + 2) + 'px'); },
+  layout() { const small = Math.min(innerWidth, innerHeight) < 560 || innerWidth < 760; const b = document.body; if (small && !b.classList.contains('compact')) b.classList.add('compact', 'tbHidden', 'toolsHidden'); else if (!small) b.classList.remove('compact', 'menuOpen'); if (b.classList.contains('compact')) { $('#objective').style.top = ($('#topbar').getBoundingClientRect().bottom + 4) + 'px'; if (this.gui) this.gui.domElement.style.top = ($('#topbar').getBoundingClientRect().bottom + 4) + 'px'; return; } const tb = $('#topbar').getBoundingClientRect(); const st = $('#stats'); st.style.top = (tb.bottom + 2) + 'px'; const sb = st.getBoundingClientRect(); const tl = $('#tools'); tl.style.top = (innerWidth > 720 ? sb.bottom + 6 : tb.bottom + 6) + 'px'; tl.style.maxHeight = (innerHeight - parseFloat(tl.style.top) - 170) + 'px'; $('#panel').style.top = (tb.bottom + 2) + 'px'; $('#objective').style.top = (tb.bottom + 4) + 'px'; this.gui && (this.gui.domElement.style.top = (tb.bottom + 2) + 'px'); },
   touchPad(tp) { const knob = tp.firstChild; let id = null, c = null; tp.addEventListener('pointerdown', e => { id = e.pointerId; c = [e.clientX, e.clientY]; tp.setPointerCapture(id); e.stopPropagation(); }); tp.addEventListener('pointermove', e => { if (e.pointerId !== id) return; const dx = clamp((e.clientX - c[0]) / 40, -1, 1), dy = clamp((e.clientY - c[1]) / 40, -1, 1); knob.style.transform = `translate(${dx * 30}px,${dy * 30}px)`; Input.touchMove = V3(dx, 0, dy); }); const end = () => { id = null; knob.style.transform = ''; Input.touchMove = null; }; tp.addEventListener('pointerup', end); tp.addEventListener('pointercancel', end); },
   buildItems() {
     document.querySelectorAll('#cats button').forEach(b => b.classList.toggle('on', b.dataset.cat === this.cat));
@@ -3684,7 +3719,8 @@ const UI = {
   // --- tutorial (first 60 seconds) ---
   tutorial() {
     if (LS.get('noTutorial', false)) return;
-    const steps = ['👋 Welcome! <b>Left-drag</b> empty space to orbit, <b>right-drag</b> to pan, <b>wheel</b> to zoom. Press <b>C</b> to switch to fly / walk cameras.', '✋ <b>Click-drag any object</b> to grab it with a spring and fling it. Try throwing the ragdoll!', '⌨️ Press <b>Space</b> to spawn objects, <b>E</b> for an explosion, <b>P</b> to pause and <b>R</b> to reset.', '🧱 Open a category in the <b>bottom toolbar</b>, pick a part and click to place it. Try <i>Templates → Catapult</i> or <i>Vehicles → Car</i>.', '🔗 Use <b>Attach</b> (left strip) to join parts with hinges, motors and ropes. <b>H</b> shows every shortcut. Have fun!'];
+    const compact = document.body.classList.contains('compact');
+    const steps = compact ? ['👋 Drag to orbit, pinch to zoom. Drag objects to throw them.', '🧱 Tap <b>Parts</b> to build, <b>🧰</b> for tools, <b>☰</b> for menus. Have fun!'] : ['👋 Welcome! <b>Left-drag</b> empty space to orbit, <b>right-drag</b> to pan, <b>wheel</b> to zoom. Press <b>C</b> to switch to fly / walk cameras.', '✋ <b>Click-drag any object</b> to grab it with a spring and fling it. Try throwing the ragdoll!', '⌨️ Press <b>Space</b> to spawn objects, <b>E</b> for an explosion, <b>P</b> to pause and <b>R</b> to reset.', '🧱 Open a category in the <b>bottom toolbar</b>, pick a part and click to place it. Try <i>Templates → Catapult</i> or <i>Vehicles → Car</i>.', '🔗 Use <b>Attach</b> (left strip) to join parts with hinges, motors and ropes. <b>H</b> shows every shortcut. Have fun!'];
     const el = h('div', { id: 'tutorial', class: 'panel' }, h('div', { class: 'ttxt' }, h('div', { class: 'tt' }), h('div', { class: 'tprog' })), h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } }, h('button', { onclick: () => { i++; show(); } }, 'Next'), h('button', { onclick: () => { el.remove(); clearInterval(iv); } }, 'Close'), h('button', { title: "Don't show again", onclick: () => { LS.set('noTutorial', true); el.remove(); clearInterval(iv); } }, 'Never')));
     $('#hud').append(el); let i = 0, t = 0; const show = () => { if (i >= steps.length) { el.remove(); clearInterval(iv); return; } el.querySelector('.tt').innerHTML = `<small style="color:var(--mut)">Tutorial ${i + 1}/${steps.length}</small><br>` + steps[i]; t = 0; };
     const iv = setInterval(() => { t += 0.25; el.querySelector('.tprog').style.width = (t / 12 * 100) + '%'; if (t >= 12) { i++; show(); } }, 250); show();
