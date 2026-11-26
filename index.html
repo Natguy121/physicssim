@@ -109,7 +109,7 @@ input[type=range]{accent-color:var(--acc)}
 #touchpad{position:fixed;left:14px;bottom:150px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,.06);border:1px solid var(--bd);z-index:9;display:none}
 #touchpad i{position:absolute;left:40px;top:40px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.2)}
 #touchbtns{position:fixed;right:14px;bottom:150px;z-index:9;display:none;gap:6px;flex-direction:column}
-#touchbtns button{width:56px;height:44px}
+#touchbtns button{width:76px;height:44px;font-size:12px}
 .lil-gui.root{position:fixed!important;right:8px;top:60px;z-index:8;max-height:calc(100vh - 240px);overflow:auto}
 .lil-gui.root.side{top:auto;bottom:150px}
 textarea.code{width:100%;height:260px;font:12px ui-monospace,Menlo,monospace;white-space:pre;tab-size:2}
@@ -127,6 +127,7 @@ body.compact .lil-gui.root{display:none}
 body.compact.menuOpen .lil-gui.root{display:block}
 body.compact #tools{top:auto!important;bottom:8px;left:4px;max-height:calc(100vh - 70px)!important;padding:3px;gap:2px}
 body.compact #tools button{width:32px;height:28px;font-size:14px}
+body.compact #tools #toolsToggle{width:auto;padding:0 6px;font-size:12px}
 body.compact #toolsToggle{display:block}
 body.compact.toolsHidden #tools>button:not(#toolsToggle),body.compact.toolsHidden #tools .tsep{display:none}
 body.compact #bottom{left:44px;right:4px;transform:none;width:auto;bottom:4px;padding:4px}
@@ -146,7 +147,7 @@ body.compact #objective{max-width:70vw;font-size:11px;padding:5px 8px}
 body.compact #touchpad{left:auto;right:84px;bottom:12px;width:96px;height:96px}
 body.compact #touchpad i{left:28px;top:28px}
 body.compact #touchbtns{right:6px;bottom:12px;gap:4px}
-body.compact #touchbtns button{width:44px;height:36px}
+body.compact #touchbtns button{width:70px;height:34px;font-size:11px}
 body.compact.tbOpen #touchpad,body.compact.tbOpen #touchbtns{display:none!important}
 @media (max-width:720px){#panel{width:calc(100vw - 16px);top:auto;bottom:150px;max-height:40vh}#tools{top:150px}#stats{display:none}.lil-gui.root{display:none}}
 </style>
@@ -841,7 +842,7 @@ const Terrain = {
   },
 };
 const SPOTS = {
-  'Test Arena': { cam: [-14, 11, 18], tgt: [0, 2, 0] }, 'Build Zone': { cam: [20, 14, 40], tgt: [30, 0, 15] }, 'Stunt Park': { cam: [25, 12, -20], tgt: [45, 3, -45] },
+  'Spawn': { cam: [0, 1.7, 18], tgt: [0, 1.5, 0] }, 'Overview': { cam: [-24, 18, 30], tgt: [0, 0, -6] }, 'Build Zone': { cam: [20, 14, 40], tgt: [30, 0, 15] }, 'Stunt Park': { cam: [25, 12, -20], tgt: [45, 3, -45] },
   'Long Hill': { cam: [18, 12, -70], tgt: [0, 10, -140] }, 'Lake': { cam: [100, 12, 60], tgt: [150, -1, 110] }, 'Cliff': { cam: [-110, 20, 20], tgt: [-150, 14, 0] },
   'Forest': { cam: [120, 14, -60], tgt: [160, 4, -100] }, 'Desert': { cam: [-20, 14, 120], tgt: [10, 2, 160] }, 'Snow': { cam: [-170, 40, -60], tgt: [-200, 28, -100] },
   'Beach': { cam: [100, 6, 120], tgt: [130, 0, 110] }, 'Rails': { cam: [80, 8, -16], tgt: [100, 2, -30] },
@@ -2343,14 +2344,7 @@ const Arena = {
       const m = new THREE.Mesh(new THREE.BoxGeometry(...size), mat); m.position.set(...pos); m.receiveShadow = true; m.castShadow = visible; m.visible = visible; g.add(m); this.bodies.push({ b, m, base: V3(...pos) }); return b;
     };
     mk([20.6, 1, 20.6], [0, -0.5, 0], new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.7 }));
-    for (const [i, s] of [[0, 1], [0, -1], [1, 1], [1, -1]].entries()) {
-      const wt = this.wallTex(i); const wm = new THREE.MeshStandardMaterial({ map: wt, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide, roughness: 0.4 });
-      const along = s[0] === 0; mk(along ? [20.6, 8, 0.3] : [0.3, 8, 20.6], along ? [0, 4, s[1] * 10.15] : [s[1] * 10.15, 4, 0], wm).castShadow = false;
-    }
-    this.bodies.slice(1).forEach(b => b.m.castShadow = false);
-    // ceiling gantry beam (chain + Newton's cradle hang from it)
-    mk([20.6, 0.3, 0.3], [0, 7.85, -7], new THREE.MeshStandardMaterial({ color: 0x556070, metalness: 0.7, roughness: 0.4 }));
-    mk([0.3, 0.3, 20.6], [-10, 7.85, 0], new THREE.MeshStandardMaterial({ color: 0x556070, metalness: 0.7, roughness: 0.4 }), false);
+    // (open plaza: no walls or ceiling gantry)
     // measuring grid lines on the floor every metre (with labels)
     const pts = []; for (let i = -10; i <= 10; i++) { pts.push(V3(i, 0.012, -10), V3(i, 0.012, 10), V3(-10, 0.012, i), V3(10, 0.012, i)); }
     const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xff9030, transparent: true, opacity: 0.35 })); g.add(lines); this.lines = lines;
@@ -2359,7 +2353,7 @@ const Arena = {
     W.createCollider(R.ColliderDesc.cuboid(2.2, 0.3, 0.15).setFriction(0.5), this.paddle);
     this.paddleMesh = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.6, 0.3), new THREE.MeshStandardMaterial({ color: 0xff5050, roughness: 0.5 })); this.paddleMesh.castShadow = true; g.add(this.paddleMesh);
     const hub = new THREE.Mesh(cyl(0.25, 0.8), new THREE.MeshStandardMaterial({ color: 0x333333 })); hub.position.set(5.5, 0.4, 5.5); g.add(hub);
-    this.paddleOn = true;
+    this.paddle.collider(0).setEnabled(false); this.paddleMesh.visible = false; hub.visible = false; this.paddleOn = false;
   },
   wallTex(i) {
     const c = Tex.canvas(1024, (g, n) => {
@@ -2660,7 +2654,7 @@ const Vehicles = {
     const rear = [];
     for (const z of [-0.85, 0.85]) { const h = hub(-1.05, z); const w = wheel(-1.05, z); b.j('hinge', w, h, -1.05, 0.45, z, [0, 0, 1]); rear.push(w); }
     for (const z of [-0.85, 0.85]) { const h = hub(1.05, z); const kn = b.e('compound', { parts: [{ t: 'box', d: [0.08, 0.14, 0.08] }, { t: 'box', d: [0.06, 0.06, 0.25], p: [0, 0, -Math.sign(z) * 0.14] }] }, 'metal', 1.05, 0.45, z, { mass: 8, part: 'knuckle' }); b.j('steer', kn, h, 1.05, 0.45, z, [0, -1, 0], { max: 30, torque: 2500 }); const w = wheel(1.05, z); b.j('hinge', w, kn, 1.05, 0.45, z, [0, 0, 1]); }
-    const carrier = b.e('wheel', { r: 0.22, w: 0.18 }, 'metal', -1.05, 0.8, 0, { q: QY(90), mass: 40, part: 'differential', color: 0xd0a040, label: 'diff' });
+    const carrier = b.e('wheel', { r: 0.22, w: 0.18 }, 'metal', -1.05, 0.8, 0, { q: QY(90), mass: 40, part: 'differential', color: 0xd0a040 });
     b.j('motor', carrier, ch, -1.05, 0.8, 0, [0, 0, 1], { rpm: 420, torque: 1000, keyF: 'ArrowUp', keyB: 'ArrowDown', brake: false, brakeKey: 'KeyB' });
     Gears.create({ type: 'diff', terms: [{ e: rear[0], ax: [1, 0, 0], c: 1 }, { e: rear[1], ax: [1, 0, 0], c: 1 }, { e: carrier, ax: [1, 0, 0], c: -2 }], ratio: 1 });
     toast('Buggy: ↑↓ drive (open differential), ←→ steer, B brake'); return b.ents;
@@ -2828,28 +2822,22 @@ const Machines = {
 
 // ==== Default test content in the arena ====================================
 Arena.populate = function () {
-  const q = new THREE.Quaternion();
-  Pyramid.build(V3(-5.5, 0, 5), q);
-  // assorted random rigid bodies dropped around the rotating paddle
+  const q = new THREE.Quaternion(), P = (id, x, z, yaw = 0) => { const p = PARTS[id], y = Terrain.surfaceY(x, z); if (p.spawn) return p.spawn(V3(x, y, z), QY(yaw)); const d = JSON.parse(JSON.stringify(p.ent)); return [Entities.create({ ...d, pos: [x, y + Kinds[d.kind].half(d.params).y, z], rot: arr4(QY(yaw)), part: id })]; };
+  Pyramid.build(V3(-8, 0, -12), q);                                   // box pyramid to knock over
+  P('car', 6, -4, 90); P('buggy', 11, -4, 90);                        // vehicles: walk up and drive with the arrow keys
+  P('dominoes', 0, -6, 0); P('bowling', -2, 4, 0);
+  P('catapult', -14, -2, 90); P('trebuchet', 16, -18, 0);
+  P('ragdoll', 3, -16); P('dummy', 5, -16); P('dummy', 7, -16);
+  P('newton', -4, -20); P('jelly', 0, -14); P('brickwall', 10, -24);
+  P('looptrack', 20, 0, 90); P('ramp', -16, 12, 90); P('flag', -10, 10);
+  Entities.create({ kind: 'box', params: { x: 3, y: 0.25, z: 3 }, mat: 'rubber', color: 0x40c0ff, pos: [8, 0.13, 8], frozen: true, part: 'rubber', label: 'Trampoline' }); Entities.all.at(-1).cols.forEach(c => c.setRestitution(1.1));
   const rnd = mulberry32(7);
-  for (let i = 0; i < 16; i++) { const d = randomBody(rnd); Entities.create({ ...d, pos: [3.5 + rnd() * 5, 1.5 + i * 0.7, 3 + rnd() * 5], rot: arr4(new THREE.Quaternion().random()), part: 'random' }); }
-  // ragdoll falling onto the floor
-  const rag = Ragdoll.build(V3(0, 2.5, 2.5), { yaw: 0.6 }); rag.torso.body.setAngvel({ x: 2, y: 0.5, z: 1 }, true);
-  // chain of linked spheres hanging from the ceiling beam
-  const anchor = Entities.create({ kind: 'box', params: { x: 0.25, y: 0.12, z: 0.25 }, mat: 'metal', pos: [-6, 7.64, -7], frozen: true, part: 'anchor' });
-  let prev = anchor, pp = V3(-6, 7.58, -7);
-  for (let i = 0; i < 10; i++) { const c = V3(-6 + i * 0.05, 7.4 - i * 0.36, -7); const s = Entities.create({ kind: 'sphere', params: { r: 0.14 }, mat: 'metal', color: 0xb8c0c8, pos: arr3(c), part: 'chainball', mass: 2, group: 'arenachain' }); Joints.create({ type: 'ball', a: s, b: prev, pa: pp, pb: pp }); prev = s; pp = c.clone().add(V3(0.025, -0.18, 0)); }
-  // Newton's cradle hanging from the beam
-  const beamAnchor = Entities.create({ kind: 'box', params: { x: 1.6, y: 0.06, z: 0.9 }, mat: 'metal', pos: [2.5, 7.67, -7], frozen: true, part: 'anchor', color: 0x556070 });
-  const b = new Bld(V3(0, 0, 0), q); Cradle.build(b, beamAnchor, 2.5, 7.64, -7, 5, 0.18, 2.2);
-  // ramp with a ball, see-saw, and a dummy
-  Entities.create({ kind: 'wedge', params: { x: 4, y: 1.4, z: 1.6 }, mat: 'wood', pos: [6.5, 0.7, -2.5], rot: arr4(QY(180)), frozen: true, part: 'ramp' });
-  Entities.create({ kind: 'sphere', params: { r: 0.25 }, mat: 'rubber', color: 0xff4040, pos: [8.2, 1.7, -2.5], part: 'sphere' });
-  Entities.create({ kind: 'box', params: { x: 0.5, y: 0.5, z: 0.5 }, mat: 'ice', pos: [7.8, 1.5, -1.4], part: 'ice', rot: arr4(QZ(-19)) });
-  PARTS.lever.spawn(V3(-5.5, 0, -2), q);
-  Entities.create({ kind: 'box', params: { x: 0.4, y: 0.4, z: 0.4 }, mat: 'metal', mass: 40, pos: [-3.7, 2.5, -2], part: 'w50', color: weightColor(40) });
-  Ragdoll.build(V3(-1.5, 0.02, -3.5), { dummy: true, label: 'Dummy' });
-  const rp = Terrain.railPts[1]; Entities.create({ ...PARTS.minecart.ent, pos: [rp.x, rp.y + 0.35, rp.z], rot: arr4(QY(0)), part: 'minecart', label: 'Minecart', respawn: [rp.x, rp.y + 0.6, rp.z] });
+  for (let i = 0; i < 14; i++) { const d = randomBody(rnd); Entities.create({ ...d, pos: [-6 + rnd() * 12, 0.6 + i * 0.4, 4 + rnd() * 6], part: 'random' }); }
+  for (let i = 0; i < 5; i++) Entities.create({ ...PARTS.crate.ent, pos: [14 + (i % 2) * 1.05, 0.5 + Math.floor(i / 2) * 1.0, 8], part: 'crate' });
+  Entities.create({ ...PARTS.tnt.ent, pos: [15, 3.2, 8], part: 'tnt' });
+  Entities.create({ ...PARTS.xbarrel.ent, pos: [-12, 0.45, 4], part: 'xbarrel' });
+  Entities.create({ kind: 'sphere', params: { r: 0.7 }, mat: 'rubber', color: 0xff5050, pos: [2, 0.7, 6], part: 'sphere', label: 'Big ball' });
+  const rp = Terrain.railPts[1]; Entities.create({ ...PARTS.minecart.ent, pos: [rp.x, rp.y + 0.35, rp.z], part: 'minecart', label: 'Minecart', respawn: [rp.x, rp.y + 0.6, rp.z] });
 };
 // ======================================================================
 // build.js
@@ -3155,7 +3143,7 @@ const Build = {
 const Cam = {
   mode: 'orbit', target: V3(0, 2, 0), orbitDist: 26, yaw: -0.7, pitch: 0.42, enabled: true, flyYaw: 0, flyPitch: 0, followEnt: null, smoothT: V3(),
   walk: null, locked: false,
-  init() { this.lookAt(V3(...SPOTS['Test Arena'].cam), V3(...SPOTS['Test Arena'].tgt)); },
+  init() { this.lookAt(V3(...SPOTS['Spawn'].cam), V3(...SPOTS['Spawn'].tgt)); },
   setMode(m) {
     if (m === this.mode) return; if (this.mode === 'walk') this.exitWalk();
     const c = App.camera;
@@ -3165,7 +3153,7 @@ const Cam = {
     if (m === 'walk') this.enterWalk();
     this.mode = m; UI.camChanged?.(); toast('Camera: ' + { orbit: 'Orbit (drag rotate · right-drag pan · wheel zoom)', fly: 'Free fly (WASD + right-drag look · Shift fast)', follow: 'Follow selected', walk: 'First-person walk (click to look · WASD · Space jump)' }[m]);
   },
-  cycle() { const m = ['orbit', 'fly', 'follow', 'walk']; this.setMode(m[(m.indexOf(this.mode) + 1) % m.length]); },
+  cycle() { const m = ['walk', 'orbit', 'follow']; this.setMode(m[(m.indexOf(this.mode) + 1) % m.length]); },
   lookAt(pos, tgt) { App.camera.position.copy(pos); this.target.copy(tgt); this.orbitDist = pos.distanceTo(tgt); this.syncOrbit(); App.camera.lookAt(tgt); if (this.mode === 'fly') this.setMode('orbit'); if (this.mode === 'walk' && this.walk) { this.walk.body.setNextKinematicTranslation(rv(pos)); this.walk.body.setTranslation(rv(pos), true); } },
   syncOrbit() { const d = App.camera.position.clone().sub(this.target); this.orbitDist = d.length(); this.yaw = Math.atan2(d.x, d.z); this.pitch = Math.asin(clamp(d.y / this.orbitDist, -1, 1)); },
   rotate(dx, dy) {
@@ -3262,6 +3250,7 @@ const Input = {
     Audio.init(); App.renderer.domElement.focus();
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (this.pointers.size === 2) { this.pinch = this.pinchDist(); if (this.drag) this.drag.mode = 'pinch'; Build.grabbed = null; return; }
+    if (Cam.mode === 'walk' && e.pointerType !== 'mouse') { this.drag = { mode: 'look', x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY }; return; }
     if (Cam.mode === 'walk') { if (!Cam.locked && e.pointerType === 'mouse') { App.renderer.domElement.requestPointerLock?.(); return; } const ev = { clientX: innerWidth / 2, clientY: innerHeight / 2, button: e.button, shiftKey: e.shiftKey, detail: e.detail }; if (Build.pointerDown(ev)) { this.drag = { mode: 'tool' }; } return; }
     if (Planets.active && Planets.probe && !Planets.launched && e.button === 0) { Build.setMouse(e.clientX, e.clientY); const h = Build.cast(); if (h && h.ent === Planets.probe) { this.drag = { mode: 'aim', x: e.clientX, y: e.clientY }; return; } }
     if (Build.pointerDown(e)) { this.drag = { mode: 'tool', x: e.clientX, y: e.clientY }; return; }
@@ -3276,6 +3265,7 @@ const Input = {
     if (e.target !== App.renderer.domElement && !this.drag) return;
     const d = this.drag;
     if (d && d.mode === 'aim') { const v = this.aimVec(e); Planets.aimPts = Planets.predict(v); return; }
+    if (d && d.mode === 'look') { Cam.rotate((e.clientX - d.x) * 1.6, (e.clientY - d.y) * 1.6); d.x = e.clientX; d.y = e.clientY; return; }
     if (d && (d.mode === 'rot' || d.mode === 'pan')) { const dx = e.clientX - d.x, dy = e.clientY - d.y; d.x = e.clientX; d.y = e.clientY; if (d.mode === 'rot') Cam.rotate(dx, dy); else Cam.pan(dx, dy); return; }
     Build.pointerMove(e);
   },
@@ -3283,6 +3273,7 @@ const Input = {
   up(e) {
     this.pointers.delete(e.pointerId); if (this.pointers.size < 2) this.pinch = null;
     const d = this.drag; this.drag = null;
+    if (d && d.mode === 'look') { if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 8) { Build.pointerDown({ clientX: e.clientX, clientY: e.clientY, button: 0, detail: 1 }); Build.pointerUp(e); } return; }
     if (d && d.mode === 'aim') { Planets.launch(this.aimVec(e)); Planets.aimPts = null; return; }
     if (d && d.mode === 'rot' && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 4 && e.button === 0 && Build.tool === 'grab') { Build.setMouse(e.clientX, e.clientY); const h = Build.cast(); if (h?.ent) Build.select(h.ent); else Build.deselectAll(); }
     Build.pointerUp(e);
@@ -3566,9 +3557,9 @@ const UI = {
     const sel = (opts, fn, title, id) => { const s = h('select', { title, onchange: e => fn(e.target.value), id }, ...opts.map(o => Array.isArray(o) ? h('option', { value: o[0] }, o[1]) : h('option', { value: o }, o))); return s; };
     this.slow = h('input', { type: 'range', min: 0.05, max: 2, step: 0.05, value: 1, title: 'Slow motion / time scale', oninput: e => { World.timeScale = +e.target.value; this.slowLbl.textContent = (+e.target.value).toFixed(2) + '×'; } }); this.slowLbl = h('span', { style: { minWidth: '38px', display: 'inline-block' } }, '1.00×');
     hud.append(h('div', { id: 'topbar' },
-      h('div', { class: 'panel grp' }, h('button', { id: 'menuBtn', title: 'Menu', onclick: () => { document.body.classList.toggle('menuOpen'); this.layout(); } }, '☰'), h('b', {}, '⚙️ Sandbox'), sel([['sandbox', '🧪 Sandbox'], ['creative', '✨ Creative'], ['challenge', '🏆 Challenge']], v => v === 'challenge' ? this.challenges() : Modes.set(v), 'Game mode', 'modeSel'), btn('🏆', 'Challenges', () => this.challenges())),
+      h('div', { class: 'panel grp' }, h('button', { id: 'menuBtn', title: 'Menu', onclick: () => { document.body.classList.toggle('menuOpen'); this.layout(); } }, '☰ Menu'), h('b', {}, '⚙️ Sandbox'), sel([['sandbox', '🧪 Sandbox'], ['creative', '✨ Creative'], ['challenge', '🏆 Challenge']], v => v === 'challenge' ? this.challenges() : Modes.set(v), 'Game mode', 'modeSel'), btn('🏆', 'Challenges', () => this.challenges())),
       h('div', { class: 'panel grp' }, btn('⏸', 'Play / Pause (P)', () => Modes.togglePlay(), 'playBtn'), btn('⟲', 'Reset to pre-test state (R)', () => Modes.reset()), btn('⏭', 'Single step (.)', () => Modes.step()), '🐢', this.slow, this.slowLbl),
-      h('div', { class: 'panel grp' }, sel([['orbit', '🎥 Orbit'], ['fly', '🕊️ Fly'], ['follow', '🎯 Follow'], ['walk', '🚶 Walk']], v => Cam.setMode(v), 'Camera (C)', 'camSel'), btn('🏟️ Test Arena', 'Teleport to the test arena', () => { if (Planets.active) Planets.exit(); Arena.go(); }), sel([['', '🌍 Go to…'], ...Object.keys(SPOTS).map(k => [k, k])], v => { if (!v) return; if (Planets.active) Planets.exit(); Cam.lookAt(V3(...SPOTS[v].cam), V3(...SPOTS[v].tgt)); $('#spotSel').value = ''; }, 'Teleport', 'spotSel')),
+      h('div', { class: 'panel grp' }, sel([['walk', '🚶 Walk'], ['orbit', '🎥 Orbit'], ['follow', '🎯 Follow']], v => Cam.setMode(v), 'Camera (C)', 'camSel'), btn('🏠 Spawn', 'Back to the spawn point', () => { if (Planets.active) Planets.exit(); Arena.go(); }), sel([['', '🌍 Go to…'], ...Object.keys(SPOTS).map(k => [k, k])], v => { if (!v) return; if (Planets.active) Planets.exit(); Cam.lookAt(V3(...SPOTS[v].cam), V3(...SPOTS[v].tgt)); $('#spotSel').value = ''; }, 'Teleport', 'spotSel')),
       h('div', { class: 'panel grp' }, sel([['', '🌪️ Disaster…'], ['quake', '🌋 Earthquake'], ['tornado', '🌪️ Tornado'], ['flood', '🌊 Flood'], ['meteors', '☄️ Meteor shower'], ['stop', '⛔ Stop all']], v => { if (v === 'stop') Disasters.stopAll(); else if (v) Disasters.start(v); $('#disSel').value = ''; }, 'Disasters', 'disSel'),
         sel([['clear', '☀️ Clear'], ['rain', '🌧️ Rain'], ['snow', '❄️ Snow'], ['storm', '⛈️ Storm']], v => Weather.set(v), 'Weather', 'wxSel'),
         sel([['-9.81', '🌍 Earth'], ['-1.62', '🌙 Moon'], ['-3.71', '🔴 Mars'], ['-24.79', '🟠 Jupiter'], ['0', '🛸 Zero-g']], v => { World.setGravity(+v); toast('Gravity ' + v + ' m/s²'); this.gui?.controllersRecursive().forEach(c => c.updateDisplay()); }, 'Gravity preset', 'gravSel')),
@@ -3577,7 +3568,7 @@ const UI = {
     ));
     hud.append(h('div', { id: 'stats', class: 'panel' }));
     // --- tool strip
-    const tools = h('div', { id: 'tools', class: 'panel' }, h('button', { id: 'toolsToggle', title: 'Show/hide tools', onclick: () => document.body.classList.toggle('toolsHidden') }, '🧰'));
+    const tools = h('div', { id: 'tools', class: 'panel' }, h('button', { id: 'toolsToggle', title: 'Show/hide tools', onclick: () => document.body.classList.toggle('toolsHidden') }, '🧰 Tools'));
     for (const t of TOOLS) { if (!t) { tools.append(h('div', { class: 'tsep' })); continue; } tools.append(h('button', { 'data-tool': t[0], title: t[2], onclick: () => Build.setTool(t[0]) }, t[1])); }
     hud.append(tools);
     // --- properties panel
@@ -3602,7 +3593,7 @@ const UI = {
     hud.append(h('div', { id: 'toast' }), h('div', { id: 'objective', class: 'panel' }));
     hud.append(h('div', { id: 'photobar', class: 'panel' }, h('button', { onclick: () => this.snapPhoto() }, '📸 Save PNG'), h('button', { onclick: () => this.togglePhoto() }, 'Exit photo mode')));
     // touch controls
-    const tp = h('div', { id: 'touchpad' }, h('i')); hud.append(tp, h('div', { id: 'touchbtns' }, h('button', { onpointerdown: () => UI.spawnAtCursor() }, '➕'), h('button', { onpointerdown: () => { const hit = Build.cast(); if (hit) Explosion.at(hit.point, this.explodePower, 6); } }, '💥'), h('button', { onpointerdown: () => { Input.jumpQ = true; } }, '⤒'), h('button', { onpointerdown: () => Cam.cycle() }, '🎥')));
+    const tp = h('div', { id: 'touchpad' }, h('i')); hud.append(tp, h('div', { id: 'touchbtns' }, h('button', { onpointerdown: () => { Input.jumpQ = true; } }, '⤒ Jump'), h('button', { onpointerdown: () => { Build.setMouse(innerWidth / 2, innerHeight / 2); UI.spawnAtCursor(); } }, '➕ Spawn'), h('button', { onpointerdown: () => { Build.setMouse(innerWidth / 2, innerHeight / 2); const hit = Build.cast(); if (hit) Explosion.at(hit.point, this.explodePower, 6); } }, '💥 Boom'), h('button', { onpointerdown: () => Cam.cycle() }, '🎥 View')));
     if (Input.isTouch) { tp.style.display = 'block'; $('#touchbtns').style.display = 'flex'; this.touchPad(tp); }
     this.buildItems(); this.toolChanged(); this.buildGui(); this.buildWindows(); this.layout(); addEventListener('resize', () => this.layout());
   },
@@ -3720,7 +3711,7 @@ const UI = {
   tutorial() {
     if (LS.get('noTutorial', false)) return;
     const compact = document.body.classList.contains('compact');
-    const steps = compact ? ['👋 Drag to orbit, pinch to zoom. Drag objects to throw them.', '🧱 Tap <b>Parts</b> to build, <b>🧰</b> for tools, <b>☰</b> for menus. Have fun!'] : ['👋 Welcome! <b>Left-drag</b> empty space to orbit, <b>right-drag</b> to pan, <b>wheel</b> to zoom. Press <b>C</b> to switch to fly / walk cameras.', '✋ <b>Click-drag any object</b> to grab it with a spring and fling it. Try throwing the ragdoll!', '⌨️ Press <b>Space</b> to spawn objects, <b>E</b> for an explosion, <b>P</b> to pause and <b>R</b> to reset.', '🧱 Open a category in the <b>bottom toolbar</b>, pick a part and click to place it. Try <i>Templates → Catapult</i> or <i>Vehicles → Car</i>.', '🔗 Use <b>Attach</b> (left strip) to join parts with hinges, motors and ropes. <b>H</b> shows every shortcut. Have fun!'];
+    const steps = compact ? ['🚶 Left stick walks, drag anywhere to look, <b>Jump</b> to jump. Tap things to use the selected tool.', '🧱 <b>Parts</b> = build, <b>🧰 Tools</b> = grab/attach/delete…, <b>☰ Menu</b> = weather, disasters, save. <b>🎥 View</b> switches to an overhead camera.'] : ['🚶 You are walking: <b>click</b> to look around with the mouse (Esc frees it), <b>WASD</b> to move, <b>Space</b> to jump. <b>C</b> switches to an overhead orbit camera.', '✋ <b>Click-drag any object</b> to grab it with a spring and fling it. Try throwing the ragdoll!', '⌨️ Press <b>Space</b> to spawn objects, <b>E</b> for an explosion, <b>P</b> to pause and <b>R</b> to reset.', '🧱 Open a category in the <b>bottom toolbar</b>, pick a part and click to place it. Try <i>Templates → Catapult</i> or <i>Vehicles → Car</i>.', '🔗 Use <b>Attach</b> (left strip) to join parts with hinges, motors and ropes. <b>H</b> shows every shortcut. Have fun!'];
     const el = h('div', { id: 'tutorial', class: 'panel' }, h('div', { class: 'ttxt' }, h('div', { class: 'tt' }), h('div', { class: 'tprog' })), h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } }, h('button', { onclick: () => { i++; show(); } }, 'Next'), h('button', { onclick: () => { el.remove(); clearInterval(iv); } }, 'Close'), h('button', { title: "Don't show again", onclick: () => { LS.set('noTutorial', true); el.remove(); clearInterval(iv); } }, 'Never')));
     $('#hud').append(el); let i = 0, t = 0; const show = () => { if (i >= steps.length) { el.remove(); clearInterval(iv); return; } el.querySelector('.tt').innerHTML = `<small style="color:var(--mut)">Tutorial ${i + 1}/${steps.length}</small><br>` + steps[i]; t = 0; };
     const iv = setInterval(() => { t += 0.25; el.querySelector('.tprog').style.width = (t / 12 * 100) + '%'; if (t >= 12) { i++; show(); } }, 250); show();
@@ -3895,7 +3886,7 @@ async function main() {
     setLoad(30, 'Creating renderer…'); App.init(); World.init(); Weather.init(); Particles.init(); Fluids.init();
     setLoad(45, 'Generating 500 m terrain, lake, cliff and forests…'); await nextFrame(); Terrain.init();
     setLoad(70, 'Building the test arena…'); await nextFrame(); Arena.init(); JRender.init(); Debug.init(); Build.init(); Cam.init(); Input.init(); UI.build(); wireSystems();
-    setLoad(85, 'Spawning test content…'); await nextFrame(); Arena.populate(); Magnets.refresh(); Modes.preTest = SaveLoad.snapshot(); UI.playChanged();
+    setLoad(85, 'Spawning test content…'); await nextFrame(); Arena.populate(); Magnets.refresh(); Modes.preTest = SaveLoad.snapshot(); UI.playChanged(); Cam.setMode('walk');
     setLoad(100, 'Ready'); await nextFrame(); $('#loading').remove(); UI.tutorial();
     window.SANDBOX = { Debug, Motors, Undo, App, World, Entities, Joints, Ropes, Gears, Logic, PARTS, Build, Modes, SaveLoad, Fire, Fluids, Explosion, Disasters, Planets, Cam, UI, Replay, LoadTest, Terrain, Cloth, Jelly, Ragdoll, Stats, Input, BEH, Fracture, Weather, Arena, Graph };
     requestAnimationFrame(t => { last = t; loop(t); });
