@@ -2166,7 +2166,7 @@ const Planets = {
   },
   spawnProbe() { if (this.probe && !this.probe.removed) Entities.remove(this.probe); this.probe = Entities.create({ kind: 'sphere', params: { r: 0.6 }, mat: 'metal', color: 0xffe040, pos: [this.pad.x, this.pad.y, this.pad.z], frozen: true, part: 'probe', label: 'Probe', extra: { gm: 0 } }); this.launched = false; this.t = 0; },
   launch(vel) { const v = vel.clampLength(0, 28); Entities.setFrozen(this.probe, false); this.probe.body.setLinvel(rv(v), true); this.launched = true; this.t = 0; this.trailPts = []; Audio.boom(this.probe.p1, 0.3); },
-  exit() { if (!this.active) return; this.active = false; App.scene.remove(this.goal); App.scene.remove(this.trail); this.probe = null; Terrain.mesh.visible = Terrain.water.visible = true; Object.values(Terrain.im).forEach(m => m.visible = true); Arena.group.visible = true; Terrain.collider.setEnabled(true); World.setGravity(this.prevG ?? -9.81); SaveLoad.restore(this.saved); UI.objective(null); Cam.lookAt(V3(...SPOTS['Test Arena'].cam), V3(...SPOTS['Test Arena'].tgt)); toast('Back on Earth'); },
+  exit() { if (!this.active) return; this.active = false; App.scene.remove(this.goal); App.scene.remove(this.trail); this.probe = null; Terrain.mesh.visible = Terrain.water.visible = true; Object.values(Terrain.im).forEach(m => m.visible = true); Arena.group.visible = true; Terrain.collider.setEnabled(true); World.setGravity(this.prevG ?? -9.81); SaveLoad.restore(this.saved); UI.objective(null); Cam.lookAt(V3(...SPOTS['Spawn'].cam), V3(...SPOTS['Spawn'].tgt)); toast('Back on Earth'); },
   pre(dt) {
     if (!this.active) return; const ms = Entities.all.filter(e => e.extra.gm > 0); const all = Entities.awake;
     for (const e of all) { if (!e.dyn) continue; let ax = 0, ay = 0, az = 0; for (const m of ms) { if (m === e) continue; const dx = m.p1.x - e.p1.x, dy = m.p1.y - e.p1.y, dz = m.p1.z - e.p1.z; const d2 = dx * dx + dy * dy + dz * dz + 0.5, inv = m.extra.gm / (d2 * Math.sqrt(d2)); ax += dx * inv; ay += dy * inv; az += dz * inv; } Entities.impulse(e, ax * e.mass * dt, ay * e.mass * dt, az * e.mass * dt); }
@@ -3545,7 +3545,7 @@ const Modes = {
   limitHit(P) { if (this.mode !== 'challenge' || !this.ch?.allow) return false; if (!this.ch.allow.includes(P.id)) { toast('🚫 Not allowed in this challenge'); return true; } return false; },
   stopTest() { this.testing = false; },
 };
-Arena.go = () => Cam.lookAt(V3(...SPOTS['Test Arena'].cam), V3(...SPOTS['Test Arena'].tgt));
+Arena.go = () => Cam.lookAt(V3(...SPOTS['Spawn'].cam), V3(...SPOTS['Spawn'].tgt));
 
 // ==== UI (HUD, panels, lil-gui, tutorial, help, photo mode) ================
 const UI = {
